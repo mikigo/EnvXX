@@ -100,6 +100,19 @@ def _ensure_installed(provider: Provider, query: str | None) -> str:
     return version
 
 
+def _split_entrypoint(spec: ToolSpec, args: list[str]) -> tuple[str | None, list[str]]:
+    """'envxx node22 npm run dev' -> ('npm', ['run', 'dev']).
+
+    Without this, 'npm' looks like an argument to node and node tries to load
+    a module by that name. Only the non-default entrypoints count, so
+    'envxx node22 script.js' still passes the file to node untouched.
+    """
+    names = {entry.name for entry in spec.entrypoints} - {spec.default_entrypoint}
+    if args and args[0] in names:
+        return args[0], args[1:]
+    return None, args
+
+
 def _split_target(target: str) -> tuple[str, str | None, str | None]:
     """'node@22:npm' -> ('node', '22', 'npm')."""
     name, _, rest = target.partition("@")
@@ -131,13 +144,15 @@ def _dispatch_run(token: str, rest: list[str]) -> int:
         spec, query = matched
         provider = _provider(spec)
         version = _ensure_installed(provider, query)
-        return runner.run(provider, version, rest)
+        entry, args = _split_entrypoint(spec, rest)
+        return runner.run(provider, version, args, entrypoint=entry)
 
     spec = _find_spec(token)
     if spec is not None:
         provider = _provider(spec)
         version = _ensure_installed(provider, None)
-        return runner.run(provider, version, rest)
+        entry, args = _split_entrypoint(spec, rest)
+        return runner.run(provider, version, args, entrypoint=entry)
 
     raise UsageError(f"unknown command: {token}")
 

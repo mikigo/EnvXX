@@ -76,7 +76,15 @@ envxx <tool> uninstall 3.11.18 # 删除某个版本（应用类可简写 rm）
 
 想直接跑应用，写名字就行：`envxx claude`。带上参数也一样：`envxx node -v` 会真的调用 node。裸的 `envxx node` 走的是子命令帮助，不会去执行。
 
-要给同一个工具指定别的入口，用 `envxx run`：
+要给同一个工具指定别的入口，直接写入口名就行。Python 带 `pip`，Node 带 `npm`、`npx`：
+
+```bash
+envxx python3.11 pip install requests
+envxx node22 npm run dev
+envxx node22 npx create-vite
+```
+
+`envxx run` 是等价写法，用于脚本里拼接：
 
 ```bash
 envxx run python@3.11:pip --version

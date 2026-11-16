@@ -323,3 +323,53 @@ def test_claude_flag_run_dispatches_to_the_binary(monkeypatch):
 
     assert _dispatch_run("claude", ["--version"]) == 0
     assert calls == [("2.1.325", ["--version"], None)]
+
+
+@pytest.mark.parametrize(
+    "token,rest,expected_entry,expected_args",
+    [
+        # 'npm' is a sibling launcher, not an argument to node
+        ("node22", ["npm", "run", "dev"], "npm", ["run", "dev"]),
+        ("node22", ["npx", "create-vite"], "npx", ["create-vite"]),
+        # a script path is an argument, and so is a flag
+        ("node22", ["script.js"], None, ["script.js"]),
+        ("node22", ["-v"], None, ["-v"]),
+        # 'node' itself is the default, so it stays out of the way
+        ("node22", ["node", "x.js"], None, ["node", "x.js"]),
+    ],
+)
+def test_dispatch_run_reads_a_launcher_before_the_default(
+    monkeypatch, token, rest, expected_entry, expected_args
+):
+    from envxx.cli import _dispatch_run
+
+    calls = []
+    monkeypatch.setattr("envxx.cli._provider", lambda spec: type(
+        "P", (), {"spec": spec, "resolve": lambda self, q: "22.23.5"}
+    )())
+    monkeypatch.setattr(
+        "envxx.cli.runner.run",
+        lambda p, v, a, entrypoint=None: calls.append((v, a, entrypoint)) or 0,
+    )
+    monkeypatch.setattr("envxx.cli.store.installed_versions", lambda name: ["22.23.5"])
+
+    assert _dispatch_run(token, rest) == 0
+    assert calls == [("22.23.5", expected_args, expected_entry)]
+
+
+def test_python_entrypoint_shorthand(monkeypatch):
+    # 'envxx python3.11 pip install x' should hit pip, not 'python pip install x'
+    from envxx.cli import _dispatch_run
+
+    calls = []
+    monkeypatch.setattr("envxx.cli._provider", lambda spec: type(
+        "P", (), {"spec": spec, "resolve": lambda self, q: "3.11.18"}
+    )())
+    monkeypatch.setattr(
+        "envxx.cli.runner.run",
+        lambda p, v, a, entrypoint=None: calls.append((v, a, entrypoint)) or 0,
+    )
+    monkeypatch.setattr("envxx.cli.store.installed_versions", lambda name: ["3.11.18"])
+
+    assert _dispatch_run("python3.11", ["pip", "install", "requests"]) == 0
+    assert calls == [("3.11.18", ["install", "requests"], "pip")]
