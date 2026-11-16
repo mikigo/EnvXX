@@ -12,6 +12,36 @@ envxx node22 -v
 envxx claude
 ```
 
+## 安装 EnvXX 自己
+
+从 [Releases](https://github.com/mikigo/EnvXX/releases/latest) 下载对应平台的单文件，改个名就能用，不用装 Python：
+
+| 系统 | 文件 |
+| --- | --- |
+| Windows x64 | `envxx-windows-x64.exe` |
+| Windows arm64 | `envxx-windows-arm64.exe` |
+| Linux x64 | `envxx-linux-x64` |
+| Linux arm64 | `envxx-linux-arm64` |
+| macOS Apple Silicon | `envxx-macos-arm64` |
+| macOS Intel | `envxx-macos-x64` |
+
+Linux 和 macOS 上记得 `chmod +x`，然后放进 `PATH` 里任意一个目录：
+
+```bash
+curl -L -o envxx https://github.com/mikigo/EnvXX/releases/latest/download/envxx-linux-x64
+chmod +x envxx && sudo mv envxx /usr/local/bin/
+```
+
+每个二进制都是自包含的，typer、rich、httpx 全打在里面，本机不需要任何 Python。
+
+从源码装也行：
+
+```bash
+pip install -e .
+```
+
+依赖只有 typer、rich、httpx，Python 3.10 起步。
+
 ## 现在支持
 
 | 工具 | 版本写法 | 入口 | 来源 |
@@ -24,7 +54,7 @@ envxx claude
 | MobaXterm | `xterm` | `xterm` | mobatek.net 便携版 |
 | dufs | `dufs` | `dufs` | GitHub Release 压缩包 |
 
-Python 和 Node 属于运行时，多个版本可以并存：`python3.11` 和 `python3.12` 各占一个目录，互不干扰。后面几个是应用，留最新版就够，多装的版本用 `update` 和 `rm` 收拾。
+Python 和 Node 属于运行时，多个版本可以并存：`python3.11` 和 `python3.12` 各占一个目录，互不干扰。后面几个是应用，留最新版就够。
 
 加新工具不用动命令行解析。写一个 provider，登记进注册表就行。Go、JDK、ripgrep 都在候选名单里，只是我还没用到。
 
@@ -32,38 +62,46 @@ Python 和 Node 属于运行时，多个版本可以并存：`python3.11` 和 `p
 
 ```bash
 envxx <tool> search            # 看远端有哪些版本
-envxx <tool> search --all      # 列表太长时用这个
+envxx <tool> search --all      # 看完整版本历史
 envxx <tool> list              # 看本地已经下了哪些
 envxx <tool> install 3.11.9    # 只下载不运行
 envxx <tool> update            # 升到最新（应用类）
 envxx <tool> where             # 打印入口的绝对路径
-envxx <tool> rm 3.11.18        # 删除某个版本
+envxx <tool> uninstall 3.11.18 # 删除某个版本（应用类可简写 rm）
 ```
+
+`search` 默认只列近期版本：应用的列表倒序取前 10 条，多出来的会提示用 `--all`。`--all` 到底有多全取决于工具——opencode 会去翻完整的 tag 历史，其余几个本来就是全量。
 
 `envxx python3.11` 这种写法，本地没有 3.11 时会自动拉最新补丁版再执行，不用先 install。
 
 想直接跑应用，写名字就行：`envxx claude`。带上参数也一样：`envxx node -v` 会真的调用 node。裸的 `envxx node` 走的是子命令帮助，不会去执行。
 
-## 安装 EnvXX 自己
-
-不想装 Python 环境的话，去 Releases 拿一个单文件：Windows 的 `envxx-windows-x64.exe`、Linux 的 `envxx-linux-x64`、macOS 的 `envxx-macos-arm64`，另有 arm64 / intel 变体，按自己的机器挑。下载下来直接用，不用安装。
-
-或者从源码装：
+要给同一个工具指定别的入口，用 `envxx run`：
 
 ```bash
-pip install -e .
+envxx run python@3.11:pip --version
+envxx run node@22:npm --version
 ```
-
-依赖只有 typer、rich、httpx。打 tag（`v0.2.0` 这种）会触发 GitHub Actions，六个平台各打一个二进制并挂到 Release 上；也可以手动跑一次，只在 Actions 里留构建产物。
 
 ## 几个说明
 
-所有东西都在 `~/.envxx`。下载的中转文件、版本目录、临时目录都在里面，`ENVXX_HOME` 可以改位置。
+所有东西都在 `~/.envxx`：
+
+```
+~/.envxx/
+├── tools/        每个工具按版本一个目录
+├── downloads/    下载缓存，断点续传就靠它
+├── cache/        远端版本列表等 JSON，默认存一天
+└── .locks/       并发安装时的锁
+```
+
+`ENVXX_HOME` 可以改位置。
 
 国内网络慢的话留了镜像变量：
 
 - `ENVXX_GITHUB_MIRROR`：GitHub 网页和 Release 下载
 - `ENVXX_GITHUB_API`：GitHub API
+- `ENVXX_GITHUB_RAW`：raw.githubusercontent.com
 - `ENVXX_NODE_DIST`：nodejs.org
 - `ENVXX_CCSWITCH_MIRROR`：CC Switch 自己的 CDN，默认指向 `dl.ccswitch.io`
 
@@ -73,8 +111,14 @@ MobaXterm 没有 API，下载地址里那段数字是构建号，从版本号推
 
 dufs 默认会换掉自带的简陋界面，用 [mikigo/dufs-shadcn-assets](https://github.com/mikigo/dufs-shadcn-assets) 那套 shadcn 皮肤。第一次 `envxx dufs` 时把资源包下到 `~/.envxx/tools/dufs/.assets`，之后直接用。你自己写了 `--assets` 就以你的为准，其他参数原样透传给 dufs。资源包拿不到时静默退回自带界面，不会因为网络问题让命令失败。
 
-GitHub 未登录限流每小时 60 次。设个 `GITHUB_TOKEN` 能提到 5000，反正不要钱。
-
 Claude Code 走的是 Open VSX，不是 VSCode 官方插件市场。两边是同一批构建，我核对过大文件字节一致，但 Open VSX 有不需要登录的 REST API。opencode 和 CC Switch 都是直接取 GitHub Release 里的官方压缩包，没有二次打包。
 
+GitHub 未登录限流每小时 60 次。设个 `GITHUB_TOKEN` 能提到 5000，反正不要钱。
+
 大文件支持断点续传，断了重跑就行，已经下过的部分不会丢。
+
+## 自己打包
+
+打 `v*` 的 tag 会触发 `.github/workflows/release.yml`，六个平台各打一个二进制挂到 Release；也能手动跑一次，只在 Actions 里留构建产物。
+
+用的是 PyInstaller，它不能交叉编译，所以每个平台在自己 runner 上打自己的。Linux 特意选 22.04 而不是最新版，这样打出来的 ELF 只要求 glibc 2.35，老一点的发行版也能跑。
