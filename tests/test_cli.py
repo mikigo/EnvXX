@@ -13,6 +13,27 @@ def isolated_home(tmp_path, monkeypatch):
     return tmp_path / "home"
 
 
+def test_no_args_shows_help_without_an_empty_error(capsys):
+    # Typer's rich help goes to stdout, so click's NoArgsIsHelpError carries an
+    # empty message; echoing it would print a stray 'error:' line
+    assert main([]) == 2
+    printed = capsys.readouterr()
+    assert "Usage:" in printed.out
+    assert "error" not in printed.err
+
+
+def test_bare_subgroup_shows_help_without_an_empty_error(capsys):
+    assert main(["node"]) == 2
+    printed = capsys.readouterr()
+    assert "Usage:" in printed.err or "Usage:" in printed.out
+    assert "error:" not in printed.err
+
+
+def test_unknown_subcommand_still_reports_the_error(capsys):
+    assert main(["node", "nonsense"]) == 2
+    assert "No such command" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize(
     "token,expected",
     [

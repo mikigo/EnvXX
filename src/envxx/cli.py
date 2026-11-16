@@ -8,7 +8,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from ._click import ClickExit, ClickUsageError
+from ._click import ClickExit, ClickNoArgsIsHelp, ClickUsageError
 
 from . import install as installer
 from . import run as runner
@@ -335,6 +335,12 @@ def main(argv: list[str] | None = None) -> int:
     except EnvxxError as exc:
         err.print(f"[red]error:[/red] {exc}")
         return 1
+    except ClickNoArgsIsHelp:
+        # click raises this with 'ctx.get_help()' as the message, but Typer's
+        # rich help writes straight to stdout, so the message is empty and
+        # only a bare 'error:' would be left over. The help is already on
+        # screen; just report the usage status code.
+        return 2
     except ClickUsageError as exc:
         err.print(f"[red]error:[/red] {exc.format_message()}")
         return 2

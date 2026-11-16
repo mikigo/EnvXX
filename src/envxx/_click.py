@@ -13,7 +13,9 @@ ClickExit = typer.Exit
 
 try:  # Typer >= 0.16
     from typer._click.core import UsageError as ClickUsageError
+    from typer._click.exceptions import NoArgsIsHelpError as ClickNoArgsIsHelp
 except ImportError:  # pragma: no cover - older Typer with real click
     from click.core import UsageError as ClickUsageError  # type: ignore
+    from click.exceptions import NoArgsIsHelpError as ClickNoArgsIsHelp  # type: ignore
 
-__all__ = ["ClickExit", "ClickUsageError"]
+__all__ = ["ClickExit", "ClickNoArgsIsHelp", "ClickUsageError"]
