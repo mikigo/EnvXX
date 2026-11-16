@@ -108,6 +108,15 @@ class Platform:
         return ".exe" if self.os == "windows" else ""
 
     @property
+    def script_suffixes(self) -> tuple[str, ...]:
+        """Extensions a console script can carry, most specific first.
+
+        pip writes name.exe on Windows (plus a name-script.py beside it that
+        is useless on its own); elsewhere it is a bare shebang script.
+        """
+        return (".exe", ".cmd", "") if self.os == "windows" else ("",)
+
+    @property
     def python_triples(self) -> tuple[str, ...]:
         return _PYTHON_TRIPLES[(self.os, self.arch)]
 

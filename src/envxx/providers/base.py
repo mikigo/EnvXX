@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 from pathlib import Path
 
 from ..platforms import Platform
 from ..versions import best_match
 from .spec import EntryPoint, InstallPlan, ToolSpec, VersionInfo
+
+# A console script name as package tooling writes it: 'envxx', 'pip-compile'.
+# No separators, and the first character cannot be a dot, so '..' cannot be
+# spelled to walk out of the version directory.
+_SCRIPT_NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
 
 
 class Provider(ABC):
@@ -63,6 +69,27 @@ class Provider(ABC):
             if path.exists():
                 return path
         return root / candidates[0]
+
+    def script_path(self, version: str, name: str) -> Path | None:
+        """A console script that pip (or a package manager) left in the version dir.
+
+        'envxx python3.11 envxx' after 'envxx python3.11 pip install -e .' is
+        the main case: the script exists but the spec cannot list every package
+        that might be installed into the runtime, so it is discovered by name.
+        A plain name only -- no path separators, so it cannot climb out of
+        the version directory.
+        """
+        if not self.spec.script_dirs or not _SCRIPT_NAME_RE.match(name):
+            return None
+        from .. import store
+
+        root = store.version_dir(self.spec.name, version)
+        for sub in self.spec.script_dirs:
+            for suffix in self.platform.script_suffixes:
+                path = root / sub / (name + suffix)
+                if path.is_file():
+                    return path
+        return None
 
     def module_fallback(self, name: str | None = None) -> tuple[str, str] | None:
         """(launcher entrypoint, module) to use when no launcher file exists.

@@ -373,3 +373,82 @@ def test_python_entrypoint_shorthand(monkeypatch):
 
     assert _dispatch_run("python3.11", ["pip", "install", "requests"]) == 0
     assert calls == [("3.11.18", ["install", "requests"], "pip")]
+
+
+def test_console_script_installed_by_pip_is_found(tmp_path, monkeypatch):
+    # 'envxx python3.11 pip install -e .' then 'envxx python3.11 envxx' used to
+    # hand 'envxx' to python as a script path, which died with Errno 2
+    from envxx.cli import _dispatch_run
+
+    version = "3.11.18"
+    root = store.version_dir("python", version)
+    (root / "Scripts").mkdir(parents=True)
+    (root / "python.exe").write_bytes(b"")
+    (root / "Scripts" / "envxx.exe").write_bytes(b"")
+
+    calls = []
+    monkeypatch.setattr(
+        "envxx.cli.runner.run",
+        lambda p, v, a, entrypoint=None: calls.append((v, a, entrypoint)) or 0,
+    )
+    monkeypatch.setattr("envxx.cli.store.installed_versions", lambda name: [version])
+
+    assert _dispatch_run("python3.11", ["envxx", "--version"]) == 0
+    assert calls == [(version, ["--version"], "envxx")]
+
+
+def test_a_name_that_is_not_a_console_script_stays_an_argument(tmp_path):
+    # an ordinary script path must still reach python untouched
+    from envxx.cli import _match_selector, _split_entrypoint
+
+    version = "3.11.18"
+    root = store.version_dir("python", version)
+    (root / "Scripts").mkdir(parents=True)
+    (root / "Scripts" / "black.exe").write_bytes(b"")
+
+    spec, _ = _match_selector("python3.11")
+    from envxx.cli import _provider
+
+    provider = _provider(spec)
+    entry, args = _split_entrypoint(provider, version, ["script.py", "-v"])
+    assert entry is None
+    assert args == ["script.py", "-v"]
+
+    entry, args = _split_entrypoint(provider, version, ["black", "--check", "."])
+    assert entry == "black"
+    assert args == ["--check", "."]
+
+
+def test_script_lookup_refuses_names_that_climb_out(tmp_path):
+    version = "3.11.18"
+    root = store.version_dir("python", version)
+    (root / "Scripts").mkdir(parents=True)
+    # a file placed outside the runtime must not be reachable by name
+    (root.parent / "outside.exe").write_bytes(b"")
+
+    from envxx.cli import _match_selector, _provider, _split_entrypoint
+
+    spec, _ = _match_selector("python3.11")
+    provider = _provider(spec)
+
+    for name in ("../outside", "..\\outside", "Scripts/envxx", "/etc/passwd"):
+        assert provider.script_path(version, name) is None
+        entry, args = _split_entrypoint(provider, version, [name])
+        assert entry is None
+        assert args == [name]
+
+
+def test_missing_console_script_names_the_fix(tmp_path, monkeypatch):
+    from envxx.platforms import Platform
+    from envxx.providers.python_provider import PythonProvider
+    from envxx.run import resolve_command
+
+    version = "3.11.18"
+    root = store.version_dir("python", version)
+    root.mkdir(parents=True)
+    (root / "python.exe").write_bytes(b"")
+
+    provider = PythonProvider(Platform("windows", "x64"))
+    with pytest.raises(Exception) as caught:
+        resolve_command(provider, version, "nosuch")
+    assert "pip install nosuch" in str(caught.value)

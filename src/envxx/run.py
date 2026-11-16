@@ -42,22 +42,39 @@ def resolve_command(
 ) -> tuple[Path, list[str]]:
     """Return (executable, leading args) for an entrypoint.
 
-    Falls back to '<default launcher> -m <module>' when the tool ships no
-    launcher file (pip in python-build-standalone install_only archives).
+    Order: a declared entrypoint, then a console script a package manager left
+    in the version dir ('pip install -e .' then 'envxx python3.11 envxx'),
+    then '<default launcher> -m <module>' when the tool ships no launcher file
+    at all (pip in python-build-standalone install_only archives).
     """
     name = entrypoint or provider.spec.default_entrypoint
-    exe = provider.entrypoint_path(version, name)
-    if exe.exists():
-        return exe, []
 
-    fallback = provider.module_fallback(name)
-    if fallback:
-        launcher_name, module = fallback
-        launcher = provider.entrypoint_path(version, launcher_name)
-        if launcher.exists():
-            return launcher, ["-m", module]
+    if provider.spec.declared_entrypoint(name) is not None:
+        exe = provider.entrypoint_path(version, name)
+        if exe.exists():
+            return exe, []
 
-    raise InstallError(f"{provider.spec.name} {version} has no {name} at {exe}")
+        fallback = provider.module_fallback(name)
+        if fallback:
+            launcher_name, module = fallback
+            launcher = provider.entrypoint_path(version, launcher_name)
+            if launcher.exists():
+                return launcher, ["-m", module]
+
+        raise InstallError(f"{provider.spec.name} {version} has no {name} at {exe}")
+
+    script = provider.script_path(version, name)
+    if script is not None:
+        return script, []
+
+    hint = ""
+    if provider.spec.script_dirs:
+        tool = provider.spec.name
+        hint = (
+            f"; install it first, e.g. "
+            f"envxx run {tool}@{version}:pip install {name}"
+        )
+    raise InstallError(f"{provider.spec.name} {version} has no {name}{hint}")
 
 
 def run(

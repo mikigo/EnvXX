@@ -34,6 +34,9 @@ class ToolSpec:
     aliases: tuple[str, ...] = ()
     entrypoints: tuple[EntryPoint, ...] = ()
     default_entrypoint: str = ""
+    # dirs inside a version dir where package managers drop console scripts,
+    # e.g. 'pip install black' writes Scripts/black.exe on Windows (bin/ on Unix)
+    script_dirs: tuple[str, ...] = ()
     checksum: ChecksumKind = "none"
 
     def __post_init__(self) -> None:
@@ -46,6 +49,12 @@ class ToolSpec:
             if candidate.name == wanted:
                 return candidate
         raise KeyError(f"{self.name} has no entrypoint named {wanted!r}")
+
+    def declared_entrypoint(self, name: str) -> EntryPoint | None:
+        for candidate in self.entrypoints:
+            if candidate.name == name:
+                return candidate
+        return None
 
 
 @dataclass(frozen=True)

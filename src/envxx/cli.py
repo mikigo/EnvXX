@@ -100,16 +100,28 @@ def _ensure_installed(provider: Provider, query: str | None) -> str:
     return version
 
 
-def _split_entrypoint(spec: ToolSpec, args: list[str]) -> tuple[str | None, list[str]]:
+def _split_entrypoint(
+    provider: Provider, version: str, args: list[str]
+) -> tuple[str | None, list[str]]:
     """'envxx node22 npm run dev' -> ('npm', ['run', 'dev']).
 
     Without this, 'npm' looks like an argument to node and node tries to load
     a module by that name. Only the non-default entrypoints count, so
     'envxx node22 script.js' still passes the file to node untouched.
+
+    A console script that pip installed into the runtime counts too, which is
+    what makes 'envxx python3.11 envxx' work after 'pip install -e .'.
     """
-    names = {entry.name for entry in spec.entrypoints} - {spec.default_entrypoint}
-    if args and args[0] in names:
-        return args[0], args[1:]
+    spec = provider.spec
+    if not args:
+        return None, args
+
+    head = args[0]
+    declared = {entry.name for entry in spec.entrypoints} - {spec.default_entrypoint}
+    if head in declared:
+        return head, args[1:]
+    if spec.script_dirs and provider.script_path(version, head) is not None:
+        return head, args[1:]
     return None, args
 
 
@@ -144,14 +156,14 @@ def _dispatch_run(token: str, rest: list[str]) -> int:
         spec, query = matched
         provider = _provider(spec)
         version = _ensure_installed(provider, query)
-        entry, args = _split_entrypoint(spec, rest)
+        entry, args = _split_entrypoint(provider, version, rest)
         return runner.run(provider, version, args, entrypoint=entry)
 
     spec = _find_spec(token)
     if spec is not None:
         provider = _provider(spec)
         version = _ensure_installed(provider, None)
-        entry, args = _split_entrypoint(spec, rest)
+        entry, args = _split_entrypoint(provider, version, rest)
         return runner.run(provider, version, args, entrypoint=entry)
 
     raise UsageError(f"unknown command: {token}")

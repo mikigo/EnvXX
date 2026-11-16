@@ -21,6 +21,9 @@ PYTHON_SPEC = ToolSpec(
         EntryPoint("pip", "pip", kind="cmd", module="pip"),
     ),
     default_entrypoint="python",
+    # 'pip install -e .' leaves envxx.exe in Scripts/ (bin/ on Unix), and a
+    # user expects 'envxx python3.11 envxx' to find it without a spec entry
+    script_dirs=("Scripts", "bin"),
     checksum="api_digest",
 )
 

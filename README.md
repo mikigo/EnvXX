@@ -67,11 +67,12 @@ envxx node22 npm run dev
 envxx node22 npx create-vite
 ```
 
-`envxx run` 是等价写法，用于脚本里拼接：
+用 pip 往这个 Python 里装的东西，也能按名字直接跑。它会去 `Scripts/`（Unix 上是 `bin/`）里找同名脚本：
 
 ```bash
-envxx run python@3.11:pip --version
-envxx run node@22:npm --version
+envxx python3.11 pip install -e .
+envxx python3.11 envxx --help
+envxx python3.11 black .
 ```
 
 ## 几个说明
