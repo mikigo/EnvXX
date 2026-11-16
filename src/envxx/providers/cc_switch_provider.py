@@ -17,6 +17,7 @@ CC_SWITCH_SPEC = ToolSpec(
     name="cc-switch",
     kind="app",
     versioned=True,
+    summary="CC Switch portable build from GitHub releases",
     selector_prefixes=("cc-switch",),
     entrypoints=(EntryPoint("cc-switch", "cc-switch"),),
     default_entrypoint="cc-switch",

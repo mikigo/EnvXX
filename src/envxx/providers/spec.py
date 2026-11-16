@@ -28,6 +28,8 @@ class ToolSpec:
     name: str
     kind: Kind
     versioned: bool
+    # one line for the command list in 'envxx --help'
+    summary: str
     selector_prefixes: tuple[str, ...]
     aliases: tuple[str, ...] = ()
     entrypoints: tuple[EntryPoint, ...] = ()

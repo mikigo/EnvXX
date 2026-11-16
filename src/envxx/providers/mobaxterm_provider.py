@@ -16,6 +16,7 @@ MOBAXTERM_SPEC = ToolSpec(
     name="xterm",
     kind="app",
     versioned=True,
+    summary="MobaXterm portable, Windows only",
     selector_prefixes=("xterm",),
     # the binary name carries the version; '{version}' is filled in on lookup
     entrypoints=(EntryPoint("xterm", "MobaXterm_Personal_{version}"),),

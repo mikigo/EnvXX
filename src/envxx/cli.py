@@ -28,7 +28,17 @@ app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
     context_settings=CONTEXT_SETTINGS,
-    help="Portable multi-runtime manager: python, node and friends under ~/.envxx.",
+    help=(
+        "Portable copies of python, node, claude and friends. "
+        "Everything lives in ~/.envxx; delete the folder to uninstall."
+    ),
+    epilog=(
+        "Examples:\n"
+        "envxx python3.11 -m pip install requests\n"
+        "envxx node22 -v\n"
+        "envxx claude\n"
+        "envxx node search"
+    ),
 )
 
 # tool catalogues such as claude's run to hundreds of entries
@@ -240,7 +250,9 @@ def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
             store.remove_version(spec.name, resolved)
         installer.install(provider, resolved)
 
-    @group.command("uninstall")
+    # apps get an 'rm' shorthand below; listing both with the same description
+    # is just noise, so keep 'uninstall' working but out of the help
+    @group.command("uninstall", hidden=spec.kind == "app")
     def uninstall_cmd(
         version: str | None = typer.Argument(None, help="version to remove"),
         yes: bool = typer.Option(False, "--yes", "-y", help="skip confirmation"),
@@ -297,7 +309,7 @@ for _spec in tool_specs():
         add_completion=False,
         no_args_is_help=True,
         context_settings=CONTEXT_SETTINGS,
-        help=f"{_spec.name} {'builds' if _spec.kind == 'app' else 'runtimes'}",
+        help=_spec.summary,
     )
     _add_tool_commands(_group, _spec)
     app.add_typer(_group, name=_spec.name)

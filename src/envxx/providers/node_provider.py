@@ -15,6 +15,7 @@ NODE_SPEC = ToolSpec(
     name="node",
     kind="runtime",
     versioned=True,
+    summary="Node.js releases from nodejs.org",
     selector_prefixes=("node", "nodejs"),
     entrypoints=(
         EntryPoint("node", "node"),

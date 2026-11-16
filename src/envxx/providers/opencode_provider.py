@@ -17,6 +17,7 @@ OPENCODE_SPEC = ToolSpec(
     name="opencode",
     kind="app",
     versioned=True,
+    summary="opencode from GitHub releases",
     selector_prefixes=("opencode",),
     # both archives hold a single binary at the root, no wrapper directory
     entrypoints=(EntryPoint("opencode", "opencode"),),

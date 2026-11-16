@@ -13,6 +13,7 @@ PYTHON_SPEC = ToolSpec(
     name="python",
     kind="runtime",
     versioned=True,
+    summary="CPython builds from python-build-standalone",
     selector_prefixes=("python", "py"),
     entrypoints=(
         EntryPoint("python", "python"),

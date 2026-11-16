@@ -13,6 +13,22 @@ def isolated_home(tmp_path, monkeypatch):
     return tmp_path / "home"
 
 
+def test_top_level_help_describes_each_tool(monkeypatch, capsys):
+    # the command list used to read 'node runtimes' / 'claude builds', which
+    # says nothing about where the thing comes from
+    assert main([]) == 2
+    printed = capsys.readouterr().out
+    for spec_summary in (
+        "python-build-standalone",
+        "nodejs.org",
+        "Open VSX",
+        "MobaXterm",
+    ):
+        assert spec_summary in printed
+    assert "node runtimes" not in printed
+    assert "claude builds" not in printed
+
+
 def test_no_args_shows_help_without_an_empty_error(capsys):
     # Typer's rich help goes to stdout, so click's NoArgsIsHelpError carries an
     # empty message; echoing it would print a stray 'error:' line

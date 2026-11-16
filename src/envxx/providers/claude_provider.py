@@ -18,6 +18,7 @@ CLAUDE_SPEC = ToolSpec(
     name="claude",
     kind="app",
     versioned=True,
+    summary="Claude Code, unpacked from the Open VSX VSIX",
     selector_prefixes=("claude",),
     entrypoints=(EntryPoint("claude", "resources/native-binary/claude"),),
     default_entrypoint="claude",

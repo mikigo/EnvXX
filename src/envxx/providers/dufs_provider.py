@@ -21,6 +21,7 @@ DUFS_SPEC = ToolSpec(
     name="dufs",
     kind="app",
     versioned=True,
+    summary="dufs file server from GitHub releases",
     selector_prefixes=("dufs",),
     # both the .zip and .tar.gz archives hold the bare binary, no wrapper dir
     entrypoints=(EntryPoint("dufs", "dufs"),),
