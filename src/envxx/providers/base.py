@@ -35,21 +35,29 @@ class Provider(ABC):
         """Asset + install details for an exact version."""
 
     # -- entrypoints -----------------------------------------------------
-    def entrypoint_candidates(self, name: str) -> list[str]:
-        """Relative paths to try inside a version dir, first existing wins."""
+    def entrypoint_candidates(self, name: str, version: str | None = None) -> list[str]:
+        """Relative paths to try inside a version dir, first existing wins.
+
+        Vendors that put the version in the binary name ('MobaXterm_Personal_
+        26.6.exe') write '{version}' into the spec; it is filled in once the
+        caller knows which version it is looking at.
+        """
         entry = self.spec.entrypoint(name)
+        relpath = entry.relpath
+        if version is not None:
+            relpath = relpath.replace("{version}", version)
         if self.platform.os == "windows":
             if entry.kind == "cmd":
-                return [entry.relpath + ".cmd", entry.relpath + ".exe", entry.relpath]
-            return [entry.relpath + self.platform.exe_suffix, entry.relpath]
-        return [entry.relpath]
+                return [relpath + ".cmd", relpath + ".exe", relpath]
+            return [relpath + self.platform.exe_suffix, relpath]
+        return [relpath]
 
     def entrypoint_path(self, version: str, name: str | None = None) -> Path:
         from .. import store
 
         entry: EntryPoint = self.spec.entrypoint(name)
         root = store.version_dir(self.spec.name, version)
-        candidates = self.entrypoint_candidates(entry.name)
+        candidates = self.entrypoint_candidates(entry.name, version)
         for relpath in candidates:
             path = root / relpath
             if path.exists():
@@ -66,6 +74,15 @@ class Provider(ABC):
         if not entry.module:
             return None
         return self.spec.default_entrypoint, entry.module
+
+    # -- execution -------------------------------------------------------
+    def augment_args(self, version: str, args: list[str]) -> list[str]:
+        """Adjust the argv handed to the launcher before it runs.
+
+        Tools that need a companion resource (dufs and its UI assets) inject
+        the flag here, so 'envxx dufs' works without the user spelling it out.
+        """
+        return args
 
     # -- version selection -----------------------------------------------
     def available_versions(self) -> list[str]:

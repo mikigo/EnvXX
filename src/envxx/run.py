@@ -67,6 +67,7 @@ def run(
     entrypoint: str | None = None,
 ) -> int:
     exe, leading = resolve_command(provider, version, entrypoint)
+    args = provider.augment_args(version, args)
 
     try:
         completed = subprocess.run(

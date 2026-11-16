@@ -13,18 +13,41 @@ from .providers.spec import Asset
 console = Console(stderr=True)
 
 
-def _expected_sha256(asset: Asset) -> str | None:
+def _expected_sha256(asset: Asset, checksum: str) -> str | None:
     if asset.sha256:
         return asset.sha256
-    if asset.sha256_url:
-        text = http.get_text(asset.sha256_url)
+    if not asset.sha256_url:
+        return None
+
+    text = http.get_text(asset.sha256_url)
+    if checksum == "sha256_file":
+        # a file holding nothing but the hex digest
+        candidate = text.strip().split()[0] if text.strip() else ""
+        if len(candidate) == 64:
+            return candidate.lower()
+        found = http.parse_sha256_sum(text, asset.sha256_filename or asset.filename)
+        if found:
+            return found
+        raise InstallError(f"no checksum in {asset.sha256_url}")
+    if checksum == "shasums_file":
         found = http.parse_sha256_sum(text, asset.sha256_filename or asset.filename)
         if not found:
             raise InstallError(
                 f"no checksum for {asset.filename} in {asset.sha256_url}"
             )
         return found
-    return None
+    return http.parse_sha256_sum(text, asset.sha256_filename or asset.filename)
+
+
+def _cache_name(version: str, filename: str) -> str:
+    """Downloads for different versions must not share one cache file.
+
+    python, node and claude embed the version in the asset name; opencode
+    ships the same filename for every release, so qualify those.
+    """
+    if version in filename:
+        return filename
+    return f"{version}-{filename}"
 
 
 def install(provider: Provider, version: str, *, quiet: bool = False) -> Path:
@@ -44,8 +67,8 @@ def install(provider: Provider, version: str, *, quiet: bool = False) -> Path:
         if not quiet:
             console.print(f"[dim]installing {tool} {version} ({asset.filename})[/dim]")
 
-        dest = store.downloads_dir() / asset.filename
-        expected = _expected_sha256(asset)
+        dest = store.downloads_dir() / _cache_name(version, asset.filename)
+        expected = _expected_sha256(asset, provider.spec.checksum)
         if dest.is_file() and expected and http.sha256_file(dest) != expected.lower():
             dest.unlink()
         if not dest.is_file():
@@ -54,7 +77,7 @@ def install(provider: Provider, version: str, *, quiet: bool = False) -> Path:
         staging = store.temp_dir(tool)
         try:
             if asset.format == "exe":
-                archive.copy_single(dest, staging)
+                archive.copy_single(dest, staging, name=plan.single_name)
             else:
                 archive.extract(dest, staging, strip_top=plan.strip_top)
 
@@ -80,7 +103,7 @@ def install(provider: Provider, version: str, *, quiet: bool = False) -> Path:
 def _verify_entrypoints(provider: Provider, version: str, staging: Path) -> None:
     """Fail loudly instead of activating a broken layout."""
     entry = provider.spec.entrypoint()
-    candidates = provider.entrypoint_candidates(entry.name)
+    candidates = provider.entrypoint_candidates(entry.name, version)
     if not any((staging / name).exists() for name in candidates):
         raise InstallError(
             f"archive for {provider.spec.name} {version} has no {entry.name} "

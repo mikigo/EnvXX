@@ -31,7 +31,8 @@ app = typer.Typer(
     help="Portable multi-runtime manager: python, node and friends under ~/.envxx.",
 )
 
-SUBCOMMANDS = ("search", "list", "install", "uninstall", "where", "run")
+# tool catalogues such as claude's run to hundreds of entries
+SEARCH_LIMIT = 10
 
 
 # ---------------------------------------------------------------------------
@@ -167,20 +168,44 @@ def _dir_size(path: Path) -> int:
 # ---------------------------------------------------------------------------
 def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
     @group.command("search")
-    def search() -> None:
+    def search(all_versions: bool = typer.Option(False, "--all", help="show every version")) -> None:
         """Remote versions available for this platform."""
         provider = _provider(spec)
-        infos = provider.display_versions()
+        # providers with huge catalogues serve a short recent list by default
+        # and only walk the whole thing when --all is explicit
+        if all_versions and hasattr(provider, "search_all"):
+            infos = provider.search_all()
+        else:
+            infos = provider.display_versions()
         installed = set(store.installed_versions(spec.name))
+        hidden = 0
+        if spec.kind == "app":
+            # app catalogues are long and only the newest matter: newest first,
+            # top SEARCH_LIMIT unless --all
+            infos = list(reversed(infos))
+            if not all_versions and len(infos) > SEARCH_LIMIT:
+                hidden = len(infos) - SEARCH_LIMIT
+                infos = infos[:SEARCH_LIMIT]
+
         table = Table(title=f"{spec.name} available", header_style="bold")
         table.add_column("version")
         table.add_column("channel")
-        table.add_column("released")
+        # catalogues that carry no publication dates (claude, cc-switch) would
+        # only get an empty column, so show it when at least one row has one
+        show_released = any(info.released for info in infos)
+        if show_released:
+            table.add_column("released")
         table.add_column("installed")
         for info in infos:
             status = "[green]yes[/green]" if info.version in installed else "[dim]-[/dim]"
-            table.add_row(info.version, info.notes or info.channel, info.released or "", status)
+            cells = [info.version, info.notes or info.channel]
+            if show_released:
+                cells.append(info.released or "")
+            cells.append(status)
+            table.add_row(*cells)
         out.print(table)
+        if hidden:
+            err.print(f"[dim]{hidden} more, use --all to list them[/dim]")
         if not infos:
             err.print(f"[yellow]no {spec.name} versions for this platform[/yellow]")
 
@@ -202,7 +227,10 @@ def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
 
     @group.command("install")
     def install_cmd(
-        version: str = typer.Argument(..., help="e.g. 3.11, 3.11.9, 22"),
+        version: str | None = typer.Argument(
+            None if spec.kind == "app" else ...,
+            help="e.g. 3.11, 3.11.9, 22" + (", defaults to latest" if spec.kind == "app" else ""),
+        ),
         force: bool = typer.Option(False, "--force", help="reinstall if present"),
     ) -> None:
         """Download and install a version."""
@@ -229,6 +257,28 @@ def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
         store.remove_version(spec.name, target)
         out.print(f"removed {spec.name} {target}")
 
+    if spec.kind == "app":
+        # 'rm' is the usual shorthand for an app-style tool
+        group.command("rm", help="Remove an installed version.")(uninstall_cmd)
+
+        @group.command("update")
+        def update_cmd() -> None:
+            """Install the newest version and point the default at it."""
+            provider = _provider(spec)
+            latest = provider.default_version()
+            installed = store.installed_versions(spec.name)
+            if latest in installed:
+                out.print(f"{spec.name} {latest} is already the latest")
+            else:
+                installer.install(provider, latest)
+            older = [v for v in installed if v != latest]
+            if older:
+                joined = ", ".join(sorted(older, key=version_key, reverse=True))
+                err.print(
+                    f"[dim]older versions still on disk: {joined}"
+                    f" (envxx {spec.name} rm {older[0]} to remove)[/dim]"
+                )
+
     @group.command("where")
     def where_cmd(version: str | None = typer.Argument(None)) -> None:
         """Print the absolute path of an installed launcher."""
@@ -247,7 +297,7 @@ for _spec in tool_specs():
         add_completion=False,
         no_args_is_help=True,
         context_settings=CONTEXT_SETTINGS,
-        help=f"{_spec.name} runtimes",
+        help=f"{_spec.name} {'builds' if _spec.kind == 'app' else 'runtimes'}",
     )
     _add_tool_commands(_group, _spec)
     app.add_typer(_group, name=_spec.name)
@@ -263,7 +313,6 @@ def main(argv: list[str] | None = None) -> int:
         if argv:
             token, rest = argv[0], argv[1:]
             spec = _find_spec(token)
-            is_subcommand = bool(rest) and rest[0] in SUBCOMMANDS
             # 'node -v' passes a flag, so it means "execute", not "manage";
             # bare 'node', 'node list' and 'node --help' belong to envxx.
             flag_run = (

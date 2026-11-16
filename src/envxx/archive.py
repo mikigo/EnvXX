@@ -121,7 +121,8 @@ def _extract_zip(archive: Path, dest: Path, strip_top: bool) -> None:
 def extract(archive: Path, dest: Path, strip_top: bool = True) -> None:
     os.makedirs(_fs(dest), exist_ok=True)
     name = archive.name.lower()
-    if name.endswith(".zip"):
+    # a .vsix is a zip container, which is how VSCode extensions ship
+    if name.endswith((".zip", ".vsix")):
         _extract_zip(archive, dest, strip_top)
     elif name.endswith((".tar.gz", ".tgz")):
         _extract_tar(archive, dest, strip_top)
@@ -129,10 +130,14 @@ def extract(archive: Path, dest: Path, strip_top: bool = True) -> None:
         raise ArchiveError(f"unsupported archive format: {archive.name}")
 
 
-def copy_single(src: Path, dest: Path) -> Path:
-    """Install a single-file artifact (e.g. a standalone .exe) into dest."""
+def copy_single(src: Path, dest: Path, name: str | None = None) -> Path:
+    """Install a single-file artifact (e.g. a standalone .exe) into dest.
+
+    Release asset names carry the version ('CC-Switch-v4.0.31-Linux-x86_64.AppImage')
+    while the entrypoint is version independent, so callers may rename.
+    """
     os.makedirs(_fs(dest), exist_ok=True)
-    target = dest / src.name
+    target = dest / (name or src.name)
     shutil.copy2(src, _fs(target))
     if os.name != "nt":
         os.chmod(_fs(target), os.stat(_fs(target)).st_mode | 0o111)

@@ -7,6 +7,8 @@ from ..platforms import Platform
 
 Kind = Literal["runtime", "app"]
 AssetFormat = Literal["zip", "tar.gz", "exe"]
+# sha256_file: raw hex at sha256_url; shasums_file: '<hex>  <name>' listing;
+# api_digest: digest carried in the API payload; none: unverified
 ChecksumKind = Literal["sha256_file", "shasums_file", "api_digest", "none"]
 
 
@@ -46,6 +48,12 @@ class ToolSpec:
 
 @dataclass(frozen=True)
 class Asset:
+    """One downloadable artifact.
+
+    The provider resolves a sha256 itself whenever the API already carries one
+    (python's asset digest); otherwise it points at a checksum URL to fetch.
+    """
+
     url: str
     filename: str
     format: AssetFormat
@@ -62,6 +70,7 @@ class VersionInfo:
     lts: bool | None = None
     released: str | None = None
     notes: str = ""
+    size: int | None = None
 
 
 @dataclass(frozen=True)
@@ -71,4 +80,6 @@ class InstallPlan:
     version: str
     asset: Asset
     strip_top: bool = True
+    # for single-file assets: store under this name instead of the asset's
+    single_name: str | None = None
     post_install: list[str] = field(default_factory=list)

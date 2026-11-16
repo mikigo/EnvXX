@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import time
+
 import pytest
 
 from envxx import store
@@ -37,6 +40,27 @@ def test_install_lock_is_exclusive():
                 pass
     # released afterwards
     with install_lock("node", "22.14.0", timeout=1.0):
+        pass
+
+
+def test_install_lock_reclaims_dead_owner():
+    store.ensure_dirs()
+    lock_path = store.locks_dir() / "node-22.14.0.lock"
+    lock_path.write_text("999999999", encoding="utf-8")  # no such process
+
+    with install_lock("node", "22.14.0", timeout=1.0, poll=0.02):
+        assert lock_path.is_file()
+    assert not lock_path.exists()
+
+
+def test_install_lock_reclaims_ancient_lock():
+    store.ensure_dirs()
+    lock_path = store.locks_dir() / "node-22.14.0.lock"
+    lock_path.write_text("", encoding="utf-8")
+    old = time.time() - 7 * 60 * 60
+    os.utime(lock_path, (old, old))
+
+    with install_lock("node", "22.14.0", timeout=1.0, poll=0.02):
         pass
 
 

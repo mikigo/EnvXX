@@ -47,6 +47,14 @@ def version_dir(tool: str, version: str) -> Path:
     return tool_dir(tool) / version
 
 
+def assets_dir(tool: str) -> Path:
+    """Side artefacts a tool needs at runtime (e.g. dufs UI themes).
+
+    Dot-prefixed so 'installed_versions' never mistakes them for a version.
+    """
+    return tool_dir(tool) / ".assets"
+
+
 def installed_versions(tool: str) -> list[str]:
     """Version directories present on disk, newest-looking first is left to caller."""
     root = tool_dir(tool)
@@ -103,8 +111,52 @@ def activate(staging: Path, target: Path, attempts: int = 5) -> None:
         raise last  # type: ignore[misc]
 
 
+def _pid_alive(pid: int) -> bool:
+    """Best-effort process liveness check.
+
+    os.kill(pid, 0) is not usable on Windows: CPython implements it as
+    TerminateProcess, so probing would kill the process.
+    """
+    if pid == os.getpid():
+        return True
+    if os.name == "nt":
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        kernel32.CloseHandle(handle)
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _lock_is_stale(lock_path: Path, max_age: float) -> bool:
+    """A lock whose owner died (or that is absurdly old) can be reclaimed."""
+    try:
+        owner = lock_path.read_text(encoding="utf-8").strip()
+        mtime = lock_path.stat().st_mtime
+    except OSError:
+        return False
+    if owner.isdigit() and not _pid_alive(int(owner)):
+        return True
+    return time.time() - mtime > max_age
+
+
 @contextmanager
-def install_lock(tool: str, version: str, timeout: float = 600.0, poll: float = 0.2):
+def install_lock(
+    tool: str,
+    version: str,
+    timeout: float = 600.0,
+    poll: float = 0.2,
+    stale_after: float = 6 * 60 * 60,
+):
     """Cross-process lock so two concurrent installs of the same version serialize."""
     locks_dir().mkdir(parents=True, exist_ok=True)
     lock_path = locks_dir() / f"{tool}-{version}.lock"
@@ -115,6 +167,13 @@ def install_lock(tool: str, version: str, timeout: float = 600.0, poll: float = 
             fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             break
         except FileExistsError:
+            # the previous owner may have been killed mid-install
+            if _lock_is_stale(lock_path, stale_after):
+                try:
+                    lock_path.unlink()
+                except FileNotFoundError:
+                    pass
+                continue
             if time.monotonic() >= deadline:
                 raise LockTimeout(
                     f"another envxx process is installing {tool} {version}"

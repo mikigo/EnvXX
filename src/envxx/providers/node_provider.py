@@ -88,7 +88,9 @@ class NodeProvider(VersionedProvider):
             ),
         )
 
-    def entrypoint_candidates(self, name: str) -> list[str]:
+    def entrypoint_candidates(
+        self, name: str, version: str | None = None
+    ) -> list[str]:
         """Windows archives keep binaries at the root; POSIX archives use bin/."""
         entry = self.spec.entrypoint(name)
         if self.platform.os == "windows":

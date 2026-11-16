@@ -97,6 +97,19 @@ def test_tar_rejects_path_escape(tmp_path: Path):
         extract(archive, tmp_path / "out", strip_top=True)
 
 
+def test_vsix_is_treated_as_zip(tmp_path: Path):
+    # VSCode extensions ship as zip containers with a .vsix name
+    archive = tmp_path / "Anthropic.claude-code-2.1.325@win32-x64.vsix"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("extension/package.json", b"{}")
+        zf.writestr("extension/resources/native-binary/claude.exe", b"bin")
+
+    dest = tmp_path / "out"
+    extract(archive, dest, strip_top=True)
+    assert (dest / "resources" / "native-binary" / "claude.exe").read_bytes() == b"bin"
+    assert not (dest / "extension").exists()
+
+
 def test_unsupported_format(tmp_path: Path):
     archive = tmp_path / "weird.tar.zst"
     archive.write_bytes(b"x")

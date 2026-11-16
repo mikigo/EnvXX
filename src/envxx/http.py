@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -24,12 +25,32 @@ _MIRRORS = (
     ("https://nodejs.org/dist/", "ENVXX_NODE_DIST"),
 )
 
+# Release assets some projects republish under their own CDN. The CDN keeps
+# the 'v{tag}/{filename}' tail, so a plain prefix swap is not enough and the
+# env var (default value below) is the only override. An empty value turns it
+# off and uses github.com directly.
+_RELEASE_MIRRORS: dict[str, tuple[str, str]] = {
+    "farion1231/cc-switch": ("ENVXX_CCSWITCH_MIRROR", "https://dl.ccswitch.io"),
+}
+_RELEASE_RE = re.compile(
+    r"^https://github\.com/(?P<repo>[^/]+/[^/]+)/releases/download/(?P<tail>.+)$"
+)
+
 
 def apply_mirror(url: str) -> str:
     for prefix, env_var in _MIRRORS:
         replacement = os.environ.get(env_var)
         if replacement and url.startswith(prefix):
             return replacement.rstrip("/") + "/" + url[len(prefix) :]
+
+    match = _RELEASE_RE.match(url)
+    if match:
+        entry = _RELEASE_MIRRORS.get(match.group("repo"))
+        if entry:
+            env_var, default = entry
+            base = os.environ.get(env_var, default)
+            if base:
+                return base.rstrip("/") + "/" + match.group("tail")
     return url
 
 
@@ -67,14 +88,28 @@ def _get(client_: httpx.Client, url: str, **kwargs: Any) -> httpx.Response:
     raise NetworkError(f"failed to fetch {url}: {last}")
 
 
-def _request_json(url: str) -> Any:
+def _rate_limit_hint(response: httpx.Response) -> str:
+    """Tell the user when the quota comes back instead of just 'rate limited'."""
+    reset = response.headers.get("x-ratelimit-reset")
+    if not reset or not reset.isdigit():
+        return ""
+    remaining = max(0, int(reset) - int(time.time()))
+    minutes = (remaining + 59) // 60
+    return f"; quota resets in about {minutes} min"
+
+
+def _request_json(url: str, missing_ok: bool = False) -> Any:
     with client() as http:
         response = _get(http, apply_mirror(url))
         if response.status_code == 404:
+            if missing_ok:
+                return None
             raise NetworkError(f"not found: {url}")
         if response.status_code in (403, 429):
             raise NetworkError(
-                f"rate limited by {url} (set GITHUB_TOKEN to raise the limit)"
+                f"GitHub API rate limit reached for {url}"
+                f"{_rate_limit_hint(response)}"
+                f" (set GITHUB_TOKEN for 5000 requests/hour)"
             )
         try:
             response.raise_for_status()
@@ -83,7 +118,7 @@ def _request_json(url: str) -> Any:
         return response.json()
 
 
-def get_json(url: str, cache_key: str, ttl: int = DEFAULT_TTL) -> Any:
+def get_json(url: str, cache_key: str, ttl: int = DEFAULT_TTL, missing_ok: bool = False) -> Any:
     cached = store.cache_dir() / f"{cache_key}.json"
     if cached.is_file() and time.time() - cached.stat().st_mtime < ttl:
         try:
@@ -91,7 +126,9 @@ def get_json(url: str, cache_key: str, ttl: int = DEFAULT_TTL) -> Any:
         except (OSError, json.JSONDecodeError):
             pass
 
-    data = _request_json(url)
+    data = _request_json(url, missing_ok=missing_ok)
+    if data is None:
+        return None
 
     cached.parent.mkdir(parents=True, exist_ok=True)
     tmp = cached.with_suffix(".json.part")
@@ -100,14 +137,28 @@ def get_json(url: str, cache_key: str, ttl: int = DEFAULT_TTL) -> Any:
     return data
 
 
-def get_text(url: str) -> str:
+def get_text(url: str, cache_key: str | None = None, ttl: int = DEFAULT_TTL) -> str:
+    cached = store.cache_dir() / f"{cache_key}.txt" if cache_key else None
+    if cached is not None and cached.is_file() and time.time() - cached.stat().st_mtime < ttl:
+        try:
+            return cached.read_text(encoding="utf-8")
+        except OSError:
+            pass
+
     with client() as http:
         response = _get(http, apply_mirror(url))
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             raise NetworkError(f"HTTP {response.status_code} from {url}") from exc
-        return response.text
+        text = response.text
+
+    if cached is not None:
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        tmp = cached.with_suffix(".txt.part")
+        tmp.write_text(text, encoding="utf-8")
+        tmp.replace(cached)
+    return text
 
 
 def sha256_file(path: Path) -> str:
@@ -132,20 +183,44 @@ def download(
     dest: Path,
     expected: str | None = None,
     show_progress: bool = True,
+    resume: bool = True,
 ) -> Path:
+    """Fetch url into dest, resuming a previous partial download when possible."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_name(dest.name + ".part")
-    if part.exists():
-        part.unlink()
+    if not resume:
+        part.unlink(missing_ok=True)
+    offset = part.stat().st_size if part.is_file() else 0
+
+    # a mirror may only carry recent releases, so keep the official URL as the
+    # last resort rather than failing the install
+    sources = [apply_mirror(url)]
+    if sources[0] != url:
+        sources.append(url)
 
     with client() as http:
-        with http.stream("GET", apply_mirror(url), headers=_auth_headers(url)) as response:
-            response.raise_for_status()
-            total = int(response.headers.get("content-length") or 0)
-            with _progress(dest.name, total, show_progress) as tick, open(part, "wb") as out:
-                for chunk in response.iter_bytes(1024 * 256):
-                    out.write(chunk)
-                    tick(len(chunk))
+        headers = dict(_auth_headers(url))
+        if offset:
+            headers["Range"] = f"bytes={offset}-"
+        for index, source in enumerate(sources):
+            is_last = index == len(sources) - 1
+            with http.stream("GET", source, headers=headers) as response:
+                if response.status_code == 404 and not is_last:
+                    continue
+                if offset and response.status_code == 200:
+                    # server ignored the Range header, start over
+                    offset = 0
+                    part.unlink(missing_ok=True)
+                response.raise_for_status()
+                total = int(response.headers.get("content-length") or 0)
+                if response.status_code == 206:
+                    total += offset
+                mode = "ab" if offset and response.status_code == 206 else "wb"
+                with _progress(dest.name, total, show_progress, initial=offset) as tick, \
+                        open(part, mode) as out:
+                    for chunk in response.iter_bytes(1024 * 256):
+                        out.write(chunk)
+                        tick(len(chunk))
 
     if expected:
         actual = sha256_file(part)
@@ -166,7 +241,7 @@ class _noop_progress:
         return False
 
 
-def _progress(label: str, total: int, enabled: bool):
+def _progress(label: str, total: int, enabled: bool, initial: int = 0):
     if not enabled or not os.isatty(2):
         return _noop_progress()
 
@@ -190,7 +265,7 @@ def _progress(label: str, total: int, enabled: bool):
         console=Console(stderr=True),
     )
     progress.start()
-    task = progress.add_task(label, total=total or None)
+    task = progress.add_task(label, total=total or None, completed=initial)
 
     class _Ticker:
         def __enter__(self_inner):

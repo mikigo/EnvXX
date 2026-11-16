@@ -132,7 +132,9 @@ class PythonProvider(VersionedProvider):
             ),
         )
 
-    def entrypoint_candidates(self, name: str) -> list[str]:
+    def entrypoint_candidates(
+        self, name: str, version: str | None = None
+    ) -> list[str]:
         """Windows keeps launchers at the root, POSIX uses bin/ with pip3 naming."""
         entry = self.spec.entrypoint(name)
         if self.platform.os == "windows":

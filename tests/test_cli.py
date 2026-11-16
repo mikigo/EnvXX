@@ -93,3 +93,154 @@ def test_selector_does_not_match_subcommand_names():
 
     for token in ("python", "node", "list", "search", "nodejs"):
         assert _match_selector(token) is None
+
+
+def _stub_claude(monkeypatch, count=25):
+    from envxx.platforms import Platform
+    from envxx.providers.claude_provider import ClaudeProvider
+    from envxx.providers.spec import VersionInfo
+
+    versions = [VersionInfo(version=f"2.1.{n}") for n in range(count)]
+
+    class Stub(ClaudeProvider):
+        def _fetch_versions(self):
+            return list(reversed(versions))
+
+    monkeypatch.setattr("envxx.cli._provider", lambda spec: Stub(Platform("windows", "x64")))
+    return versions
+
+
+def test_claude_search_hides_versions_beyond_the_limit(monkeypatch, capsys):
+    _stub_claude(monkeypatch, count=25)
+    assert main(["claude", "search"]) == 0
+    printed = capsys.readouterr()
+    assert "2.1.24" in printed.out          # newest first
+    assert "2.1.15" in printed.out
+    assert "2.1.14" not in printed.out
+    assert "15 more, use --all" in printed.err
+
+
+def test_claude_search_all_shows_everything(monkeypatch, capsys):
+    _stub_claude(monkeypatch, count=25)
+    assert main(["claude", "search", "--all"]) == 0
+    printed = capsys.readouterr()
+    assert "2.1.0" in printed.out
+    assert "more, use --all" not in printed.err
+
+
+def test_runtime_search_stays_ascending(monkeypatch, capsys):
+    from envxx.platforms import Platform
+    from envxx.providers.node_provider import NodeProvider
+    from envxx.providers.spec import VersionInfo
+
+    class Stub(NodeProvider):
+        def _fetch_versions(self):
+            return [VersionInfo(version=v) for v in ("20.19.0", "22.14.0", "24.22.3")]
+
+    monkeypatch.setattr("envxx.cli._provider", lambda spec: Stub(Platform("windows", "x64")))
+    assert main(["node", "search"]) == 0
+    out = capsys.readouterr().out
+    assert out.index("20.19.0") < out.index("22.14.0") < out.index("24.22.3")
+
+
+def test_search_hides_the_released_column_when_dates_are_missing(monkeypatch, capsys):
+    from envxx.platforms import Platform
+    from envxx.providers.claude_provider import ClaudeProvider
+    from envxx.providers.spec import VersionInfo
+
+    class Stub(ClaudeProvider):
+        def _fetch_versions(self):
+            return [VersionInfo(version="2.1.325"), VersionInfo(version="2.1.323")]
+
+    monkeypatch.setattr("envxx.cli._provider", lambda spec: Stub(Platform("windows", "x64")))
+    assert main(["claude", "search"]) == 0
+    assert "released" not in capsys.readouterr().out
+
+
+def test_search_shows_the_released_column_when_dates_exist(monkeypatch, capsys):
+    from envxx.platforms import Platform
+    from envxx.providers.node_provider import NodeProvider
+    from envxx.providers.spec import VersionInfo
+
+    class Stub(NodeProvider):
+        def _fetch_versions(self):
+            return [
+                VersionInfo(version="22.14.0", released="2025-02-11"),
+                VersionInfo(version="20.19.0", released="2025-03-24"),
+            ]
+
+    monkeypatch.setattr("envxx.cli._provider", lambda spec: Stub(Platform("windows", "x64")))
+    assert main(["node", "search"]) == 0
+    printed = capsys.readouterr().out
+    assert "released" in printed
+    assert "2025-02-11" in printed
+
+
+def test_search_omits_blank_dates_when_other_rows_have_them(monkeypatch, capsys):
+    from envxx.platforms import Platform
+    from envxx.providers.node_provider import NodeProvider
+    from envxx.providers.spec import VersionInfo
+
+    class Stub(NodeProvider):
+        def _fetch_versions(self):
+            return [
+                VersionInfo(version="22.14.0", released="2025-02-11"),
+                VersionInfo(version="20.19.0", released=None),
+            ]
+
+    monkeypatch.setattr("envxx.cli._provider", lambda spec: Stub(Platform("windows", "x64")))
+    assert main(["node", "search"]) == 0
+    printed = capsys.readouterr().out
+    assert "released" in printed
+    assert "20.19.0" in printed
+
+
+def test_app_tools_expose_rm_and_update():
+    from envxx.cli import app
+
+    group = next(g for g in app.registered_groups if g.name == "claude")
+    names = {command.name for command in group.typer_instance.registered_commands}
+    assert {"install", "uninstall", "rm", "update", "search", "list", "where"} <= names
+
+
+def test_runtime_tools_have_no_app_only_commands():
+    from envxx.cli import app
+
+    group = next(g for g in app.registered_groups if g.name == "node")
+    names = {command.name for command in group.typer_instance.registered_commands}
+    assert "update" not in names
+    assert "rm" not in names
+
+
+def test_cc_switch_is_registered_as_an_app():
+    from envxx.cli import app
+
+    group = next(g for g in app.registered_groups if g.name == "cc-switch")
+    names = {command.name for command in group.typer_instance.registered_commands}
+    assert {"install", "uninstall", "rm", "update", "search", "list", "where"} <= names
+
+
+def test_cc_switch_selector_runs_a_pinned_version():
+    # apps declare selector prefixes too, so 'cc-switch4.0' runs 4.0.x
+    from envxx.cli import _match_selector
+
+    matched = _match_selector("cc-switch4.0")
+    assert matched is not None
+    spec, query = matched
+    assert spec.name == "cc-switch"
+    assert query == "4.0"
+    assert _match_selector("cc-switch") is None
+
+
+def test_claude_flag_run_dispatches_to_the_binary(monkeypatch):
+    from envxx.cli import _dispatch_run
+
+    calls = []
+    monkeypatch.setattr("envxx.cli._provider", lambda spec: type(
+        "P", (), {"spec": spec, "resolve": lambda self, q: "2.1.325"}
+    )())
+    monkeypatch.setattr("envxx.cli.runner.run", lambda p, v, a, entrypoint=None: calls.append((v, a, entrypoint)) or 0)
+    monkeypatch.setattr("envxx.cli.store.installed_versions", lambda name: ["2.1.325"])
+
+    assert _dispatch_run("claude", ["--version"]) == 0
+    assert calls == [("2.1.325", ["--version"], None)]

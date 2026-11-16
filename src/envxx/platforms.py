@@ -25,6 +25,74 @@ _NODE_KEYS: dict[tuple[str, str], tuple[str, str, str]] = {
     ("macos", "arm64"): ("osx-arm64-tar", "darwin-arm64", ".tar.gz"),
 }
 
+# host os/arch -> Open VSX / marketplace targetPlatform value
+_VSIX_PLATFORMS: dict[tuple[str, str], str] = {
+    ("windows", "x64"): "win32-x64",
+    ("windows", "arm64"): "win32-arm64",
+    ("linux", "x64"): "linux-x64",
+    ("linux", "arm64"): "linux-arm64",
+    ("macos", "x64"): "darwin-x64",
+    ("macos", "arm64"): "darwin-arm64",
+}
+
+# host os/arch -> (opencode release asset name, archive format)
+_OPENCODE_ASSETS: dict[tuple[str, str], tuple[str, str]] = {
+    ("windows", "x64"): ("opencode-windows-x64.zip", "zip"),
+    ("windows", "arm64"): ("opencode-windows-arm64.zip", "zip"),
+    ("linux", "x64"): ("opencode-linux-x64.tar.gz", "tar.gz"),
+    ("linux", "arm64"): ("opencode-linux-arm64.tar.gz", "tar.gz"),
+    ("macos", "x64"): ("opencode-darwin-x64.zip", "zip"),
+    ("macos", "arm64"): ("opencode-darwin-arm64.zip", "zip"),
+}
+
+# host os/arch -> release asset suffix (the version sits between the prefix
+# 'CC-Switch-v' and this suffix), archive format, launcher path inside the
+# install dir, and the fixed name a single-file asset is stored under
+_CC_SWITCH_ASSETS: dict[tuple[str, str], tuple[str, str, str, str | None]] = {
+    ("windows", "x64"): ("-Windows-Portable.zip", "zip", "cc-switch.exe", None),
+    ("windows", "arm64"): (
+        "-Windows-arm64-Portable.zip",
+        "zip",
+        "cc-switch.exe",
+        None,
+    ),
+    ("linux", "x64"): (
+        "-Linux-x86_64.AppImage",
+        "exe",
+        "cc-switch.AppImage",
+        "cc-switch.AppImage",
+    ),
+    ("linux", "arm64"): (
+        "-Linux-arm64.AppImage",
+        "exe",
+        "cc-switch.AppImage",
+        "cc-switch.AppImage",
+    ),
+    ("macos", "x64"): (
+        "-macOS.tar.gz",
+        "tar.gz",
+        "CC Switch.app/Contents/MacOS/cc-switch",
+        None,
+    ),
+    ("macos", "arm64"): (
+        "-macOS.tar.gz",
+        "tar.gz",
+        "CC Switch.app/Contents/MacOS/cc-switch",
+        None,
+    ),
+}
+
+
+# host os/arch -> (rust target triple used in dufs asset names, archive format)
+_DUFS_ASSETS: dict[tuple[str, str], tuple[str, str]] = {
+    ("windows", "x64"): ("x86_64-pc-windows-msvc", "zip"),
+    ("windows", "arm64"): ("aarch64-pc-windows-msvc", "zip"),
+    ("linux", "x64"): ("x86_64-unknown-linux-musl", "tar.gz"),
+    ("linux", "arm64"): ("aarch64-unknown-linux-musl", "tar.gz"),
+    ("macos", "x64"): ("x86_64-apple-darwin", "tar.gz"),
+    ("macos", "arm64"): ("aarch64-apple-darwin", "tar.gz"),
+}
+
 
 @dataclass(frozen=True)
 class Platform:
@@ -54,6 +122,48 @@ class Platform:
     @property
     def node_archive_ext(self) -> str:
         return _NODE_KEYS[(self.os, self.arch)][2]
+
+    @property
+    def vsix_platform(self) -> str:
+        """VSCode marketplace targetPlatform, e.g. win32-x64."""
+        return _VSIX_PLATFORMS[(self.os, self.arch)]
+
+    @property
+    def opencode_asset(self) -> str:
+        """opencode release asset filename for this platform."""
+        return _OPENCODE_ASSETS[(self.os, self.arch)][0]
+
+    @property
+    def opencode_format(self) -> str:
+        return _OPENCODE_ASSETS[(self.os, self.arch)][1]
+
+    @property
+    def cc_switch_suffix(self) -> str:
+        """Release asset suffix that identifies this platform's portable build."""
+        return _CC_SWITCH_ASSETS[(self.os, self.arch)][0]
+
+    @property
+    def cc_switch_format(self) -> str:
+        return _CC_SWITCH_ASSETS[(self.os, self.arch)][1]
+
+    @property
+    def cc_switch_launcher(self) -> str:
+        """Launcher path relative to the install dir."""
+        return _CC_SWITCH_ASSETS[(self.os, self.arch)][2]
+
+    @property
+    def cc_switch_single_name(self) -> str | None:
+        """Name for a one-file asset; None when the asset is an archive."""
+        return _CC_SWITCH_ASSETS[(self.os, self.arch)][3]
+
+    @property
+    def dufs_triple(self) -> str:
+        """Rust target triple, as spelled in dufs release asset names."""
+        return _DUFS_ASSETS[(self.os, self.arch)][0]
+
+    @property
+    def dufs_format(self) -> str:
+        return _DUFS_ASSETS[(self.os, self.arch)][1]
 
 
 def _normalize_arch(machine: str) -> str:
