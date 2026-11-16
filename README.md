@@ -14,23 +14,28 @@ envxx claude
 
 ## 安装 EnvXX 自己
 
-从 [Releases](https://github.com/mikigo/EnvXX/releases/latest) 下载对应平台的单文件，改个名就能用，不用装 Python：
+从 [Releases](https://github.com/mikigo/EnvXX/releases/latest) 下载对应平台的 zip，解压后是一个同名目录，里面就是单文件二进制，不用装 Python：
 
-| 系统 | 文件 |
-| --- | --- |
-| Windows x64 | `envxx-windows-x64.exe` |
-| Windows arm64 | `envxx-windows-arm64.exe` |
-| Linux x64 | `envxx-linux-x64` |
-| Linux arm64 | `envxx-linux-arm64` |
-| macOS Apple Silicon | `envxx-macos-arm64` |
-| macOS Intel | `envxx-macos-x64` |
+| 系统 | 压缩包 | 解压后 |
+| --- | --- | --- |
+| Windows x64 | `<版本>-windows-x64.zip` | `<版本>-windows-x64/envxx.exe` |
+| Windows arm64 | `<版本>-windows-arm64.zip` | `<版本>-windows-arm64/envxx.exe` |
+| Linux x64 | `<版本>-linux-x64.zip` | `<版本>-linux-x64/envxx` |
+| Linux arm64 | `<版本>-linux-arm64.zip` | `<版本>-linux-arm64/envxx` |
+| macOS Apple Silicon | `<版本>-macos-arm64.zip` | `<版本>-macos-arm64/envxx` |
+| macOS Intel | `<版本>-macos-x64.zip` | `<版本>-macos-x64/envxx` |
 
-Linux 和 macOS 上记得 `chmod +x`，然后放进 `PATH` 里任意一个目录：
+`<版本>` 是 tag 去掉 `v`，比如 `v1.0.2` 对应 `1.0.2-linux-x64.zip`。文件名带版本，`latest/download/` 这种固定路径就用不了了，先问一下 API：
 
 ```bash
-curl -L -o envxx https://github.com/mikigo/EnvXX/releases/latest/download/envxx-linux-x64
-chmod +x envxx && sudo mv envxx /usr/local/bin/
+version=$(curl -s https://api.github.com/repos/mikigo/EnvXX/releases/latest \
+  | grep -o '"tag_name": *"v[^"]*"' | cut -d'"' -f4); version=${version#v}
+curl -L -o envxx.zip "https://github.com/mikigo/EnvXX/releases/latest/download/${version}-linux-x64.zip"
+unzip envxx.zip
+chmod +x "${version}-linux-x64/envxx" && sudo mv "${version}-linux-x64/envxx" /usr/local/bin/
 ```
+
+zip 里带了 Unix 权限位，`unzip` 解出来的 Linux/macOS 二进制本来就是可执行的，`chmod` 只是保险。
 
 每个二进制都是自包含的，typer、rich、httpx 全打在里面，本机不需要任何 Python。
 
@@ -127,6 +132,6 @@ GitHub 未登录限流每小时 60 次。设个 `GITHUB_TOKEN` 能提到 5000，
 
 ## 自己打包
 
-打 `v*` 的 tag 会触发 `.github/workflows/release.yml`，六个平台各打一个二进制挂到 Release；也能手动跑一次，只在 Actions 里留构建产物。
+打 `v*` 的 tag 会触发 `.github/workflows/release.yml`，六个平台各打一个二进制，包成 `<版本>-<平台>.zip` 挂到 Release；也能手动跑一次，版本号填了就用填的，挂在 tag 上就用 tag，都没有则用 `dev-<commit>`，只在 Actions 里留构建产物。
 
 用的是 PyInstaller，它不能交叉编译，所以每个平台在自己 runner 上打自己的。Linux 特意选 22.04 而不是最新版，这样打出来的 ELF 只要求 glibc 2.35，老一点的发行版也能跑。

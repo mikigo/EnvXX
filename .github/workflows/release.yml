@@ -4,6 +4,10 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version for the zip and directory names (default: the tag, or dev-<commit>); a leading 'v' is dropped"
+        required: false
 
 permissions:
   contents: write
@@ -30,18 +34,21 @@ jobs:
           # PyInstaller cannot cross-compile: each runner produces the binary
           # for its own OS and CPU. Linux builds use 22.04 so the resulting
           # ELF only needs glibc 2.35 instead of the 24.04 runner's 2.39.
+          #
+          # The zip is named <version>-<platform>.zip and unpacks to a single
+          # directory of the same name holding the binary.
           - os: windows-latest
-            asset: envxx-windows-x64.exe
+            platform: windows-x64
           - os: windows-11-arm
-            asset: envxx-windows-arm64.exe
+            platform: windows-arm64
           - os: ubuntu-22.04
-            asset: envxx-linux-x64
+            platform: linux-x64
           - os: ubuntu-22.04-arm
-            asset: envxx-linux-arm64
+            platform: linux-arm64
           - os: macos-latest
-            asset: envxx-macos-arm64
+            platform: macos-arm64
           - os: macos-15-intel
-            asset: envxx-macos-x64
+            platform: macos-x64
     steps:
       - uses: actions/checkout@v7
 
@@ -78,17 +85,91 @@ jobs:
           # no arguments: help on stdout, usage status, nothing on stderr
           test -z "$("$bin" 2>&1 >/dev/null)"
 
-      - name: name the artifact
+      - name: resolve version
+        id: version
         shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          bin=dist/envxx
-          [ -f "$bin" ] || bin=dist/envxx.exe
-          mv "$bin" "dist/${{ matrix.asset }}"
+          # An explicit version from a manual run wins; otherwise a tag names
+          # the release, whether it arrived as a push or as a manual run on
+          # that tag. Without either, still give the archive a stable name.
+          if [ -n "$INPUT_VERSION" ]; then
+            # Accept a leading 'v' here too, so typing v1.0.2 matches the tag.
+            version="${INPUT_VERSION#v}"
+          elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="dev-${GITHUB_SHA:0:7}"
+          fi
+          case "$version" in
+            "" | *[!0-9A-Za-z._-]*)
+              echo "::error::invalid version '$version'"
+              exit 1
+              ;;
+          esac
+          echo "stage=$version-${{ matrix.platform }}" >> "$GITHUB_OUTPUT"
+
+      - name: package
+        shell: bash
+        env:
+          STAGE: ${{ steps.version.outputs.stage }}
+        run: |
+          # Check .exe first: on Windows, Git Bash answers 'test -f dist/envxx'
+          # for dist/envxx.exe too, and 'basename' would then lose the suffix.
+          if [ -f dist/envxx.exe ]; then
+            bin=dist/envxx.exe
+          elif [ -f dist/envxx ]; then
+            bin=dist/envxx
+          else
+            echo "::error::pyinstaller produced no binary in dist/"
+            ls -l dist || true
+            exit 1
+          fi
+          mkdir -p "dist/$STAGE"
+          mv "$bin" "dist/$STAGE/$(basename "$bin")"
+          python - <<'PY'
+          import os
+          import pathlib
+          import time
+          import zipfile
+
+          stage = os.environ["STAGE"]
+          root = pathlib.Path("dist") / stage
+          archive = pathlib.Path("dist") / f"{stage}.zip"
+
+          with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
+              # Stage the top directory itself as an entry, so every extractor
+              # creates it, not just the ones that infer it from the file path.
+              top = zipfile.ZipInfo(f"{stage}/")
+              top.date_time = time.localtime(root.stat().st_mtime)[:6]
+              top.create_system = 3
+              top.external_attr = 0o40755 << 16
+              zf.writestr(top, b"")
+
+              for path in sorted(root.rglob("*")):
+                  arcname = path.relative_to(root.parent).as_posix()
+                  info = zipfile.ZipInfo(arcname + "/" if path.is_dir() else arcname)
+                  info.date_time = time.localtime(path.stat().st_mtime)[:6]
+                  info.compress_type = zipfile.ZIP_DEFLATED
+                  # create_system 3 (Unix) makes unzip honour the mode bits, so
+                  # the binary comes out of the archive already executable.
+                  info.create_system = 3
+                  info.external_attr = (0o40755 if path.is_dir() else 0o100755) << 16
+                  zf.writestr(info, b"" if path.is_dir() else path.read_bytes())
+
+          # The archive must hold exactly one directory, holding one binary.
+          with zipfile.ZipFile(archive) as zf:
+              files = [n for n in zf.namelist() if not n.endswith("/")]
+          assert len(files) == 1, files
+          assert files[0].startswith(stage + "/"), files
+          print(f"{archive}: {files[0]}")
+          PY
 
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.asset }}
-          path: dist/${{ matrix.asset }}
+          name: ${{ steps.version.outputs.stage }}
+          path: dist/${{ steps.version.outputs.stage }}.zip
           if-no-files-found: error
 
   release:
