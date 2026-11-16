@@ -64,12 +64,17 @@ jobs:
 
       # A frozen entry point runs without package context, so this catches the
       # relative-import breakage that only shows up in the bundled binary.
+      #
+      # Output goes to a file rather than a pipe: 'grep -q' would exit on the
+      # first match and close the pipe, and with Actions' default '-o pipefail'
+      # the resulting write error would fail the step for no real reason.
       - name: smoke test
         shell: bash
         run: |
           bin=dist/envxx
           [ -f "$bin" ] || bin=dist/envxx.exe
-          "$bin" --help | grep -q "Portable copies"
+          "$bin" --help > help.txt
+          grep -q "Portable copies" help.txt
           # no arguments: help on stdout, usage status, nothing on stderr
           test -z "$("$bin" 2>&1 >/dev/null)"
 

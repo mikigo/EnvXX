@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import errno
+import os
+
 import pytest
 
 from envxx import store
@@ -11,6 +14,29 @@ from envxx.errors import UsageError
 def isolated_home(tmp_path, monkeypatch):
     monkeypatch.setenv(store.HOME_ENV, str(tmp_path / "home"))
     return tmp_path / "home"
+
+
+def test_pipe_is_gone_recognises_epipe_and_windows_einval():
+    from envxx.cli import _pipe_is_gone
+
+    assert _pipe_is_gone(OSError(errno.EPIPE, "broken pipe"))
+    # Windows reports a closed pipe as EINVAL, not EPIPE
+    assert _pipe_is_gone(OSError(errno.EINVAL, "invalid argument")) == (os.name == "nt")
+    assert not _pipe_is_gone(OSError(errno.ENOENT, "missing"))
+
+
+def test_closed_pipe_exits_quietly(monkeypatch):
+    # 'envxx --help | head' makes the writer hit a closed pipe mid-render;
+    # that must not surface as a traceback
+    from envxx import cli
+
+    def boom(*_args, **_kwargs):
+        raise OSError(errno.EINVAL, "invalid argument")
+
+    monkeypatch.setattr(cli, "_silence_streams", lambda: None)
+    monkeypatch.setattr(cli, "app", boom)
+    # the reader chose to stop early, so this is not a failure of the command
+    assert cli.main(["--help"]) == 0
 
 
 def test_top_level_help_describes_each_tool(monkeypatch, capsys):

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import errno
+import os
 import re
 import sys
 from pathlib import Path
@@ -318,6 +320,32 @@ for _spec in tool_specs():
 # ---------------------------------------------------------------------------
 # entry point
 # ---------------------------------------------------------------------------
+def _pipe_is_gone(exc: OSError) -> bool:
+    """True when the error means the reader went away mid-write.
+
+    A downstream reader that exits early ('envxx --help | head') closes the
+    pipe; writing there raises EPIPE on Unix but EINVAL on Windows, and rich
+    only recognises BrokenPipeError.
+    """
+    if exc.errno == errno.EPIPE:
+        return True
+    return os.name == "nt" and exc.errno == errno.EINVAL
+
+
+def _silence_streams() -> None:
+    """Point stdout/stderr at devnull so the interpreter's exit flush is quiet.
+
+    Without this the final flush of the already-broken stream prints a second
+    'Exception ignored in ... OSError' block after we have recovered.
+    """
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            os.dup2(devnull, stream.fileno())
+        except (OSError, ValueError):
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
 
@@ -362,6 +390,13 @@ def main(argv: list[str] | None = None) -> int:
         return 130
     except KeyboardInterrupt:
         return 130
+    except OSError as exc:
+        if not _pipe_is_gone(exc):
+            raise
+        # The reader stopped listening ('envxx --help | head'). The command
+        # itself did its job, so report success and leave it at that.
+        _silence_streams()
+        return 0
 
 
 if __name__ == "__main__":
