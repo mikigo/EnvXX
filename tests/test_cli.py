@@ -30,13 +30,29 @@ def test_closed_pipe_exits_quietly(monkeypatch):
     # that must not surface as a traceback
     from envxx import cli
 
+    # Windows says EINVAL here, Unix says EPIPE; the test has to speak the
+    # platform's dialect or it checks the wrong branch on one of them
+    closed_pipe = errno.EINVAL if os.name == "nt" else errno.EPIPE
+
     def boom(*_args, **_kwargs):
-        raise OSError(errno.EINVAL, "invalid argument")
+        raise OSError(closed_pipe, "closed pipe")
 
     monkeypatch.setattr(cli, "_silence_streams", lambda: None)
     monkeypatch.setattr(cli, "app", boom)
     # the reader chose to stop early, so this is not a failure of the command
     assert cli.main(["--help"]) == 0
+
+
+def test_other_oserrors_are_not_swallowed(monkeypatch):
+    # a missing file must still blow up; only the closed-pipe shape is special
+    from envxx import cli
+
+    def boom(*_args, **_kwargs):
+        raise OSError(errno.ENOENT, "missing")
+
+    monkeypatch.setattr(cli, "app", boom)
+    with pytest.raises(OSError):
+        cli.main(["--help"])
 
 
 def test_top_level_help_describes_each_tool(monkeypatch, capsys):
