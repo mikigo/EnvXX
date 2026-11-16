@@ -46,11 +46,15 @@ envxx <tool> rm 3.11.18        # 删除某个版本
 
 ## 安装 EnvXX 自己
 
+不想装 Python 环境的话，去 Releases 拿一个单文件：Windows 的 `envxx-windows-x64.exe`、Linux 的 `envxx-linux-x64`、macOS 的 `envxx-macos-arm64`，另有 arm64 / intel 变体，按自己的机器挑。下载下来直接用，不用安装。
+
+或者从源码装：
+
 ```bash
 pip install -e .
 ```
 
-依赖只有 typer、rich、httpx。
+依赖只有 typer、rich、httpx。打 tag（`v0.2.0` 这种）会触发 GitHub Actions，六个平台各打一个二进制并挂到 Release 上；也可以手动跑一次，只在 Actions 里留构建产物。
 
 ## 几个说明
 

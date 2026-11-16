@@ -1,0 +1,102 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: python -m pytest -q
+
+  build:
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # PyInstaller cannot cross-compile: each runner produces the binary
+          # for its own OS and CPU. Linux builds use 22.04 so the resulting
+          # ELF only needs glibc 2.35 instead of the 24.04 runner's 2.39.
+          - os: windows-latest
+            asset: envxx-windows-x64.exe
+          - os: windows-11-arm
+            asset: envxx-windows-arm64.exe
+          - os: ubuntu-22.04
+            asset: envxx-linux-x64
+          - os: ubuntu-22.04-arm
+            asset: envxx-linux-arm64
+          - os: macos-latest
+            asset: envxx-macos-arm64
+          - os: macos-15-intel
+            asset: envxx-macos-x64
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pyinstaller
+
+      - name: build
+        run: >
+          pyinstaller --clean --noconfirm --onefile --name envxx
+          --paths src --hidden-import envxx
+          --distpath dist --workpath build/work --specpath build
+          src/envxx/__main__.py
+
+      # A frozen entry point runs without package context, so this catches the
+      # relative-import breakage that only shows up in the bundled binary.
+      - name: smoke test
+        shell: bash
+        run: |
+          bin=dist/envxx
+          [ -f "$bin" ] || bin=dist/envxx.exe
+          "$bin" --help | grep -q "Portable copies"
+          # no arguments: help on stdout, usage status, nothing on stderr
+          test -z "$("$bin" 2>&1 >/dev/null)"
+
+      - name: name the artifact
+        shell: bash
+        run: |
+          bin=dist/envxx
+          [ -f "$bin" ] || bin=dist/envxx.exe
+          mv "$bin" "dist/${{ matrix.asset }}"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*
+          generate_release_notes: true
