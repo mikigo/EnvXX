@@ -375,16 +375,40 @@ def test_python_entrypoint_shorthand(monkeypatch):
     assert calls == [("3.11.18", ["install", "requests"], "pip")]
 
 
-def test_console_script_installed_by_pip_is_found(tmp_path, monkeypatch):
+def _force_platform(monkeypatch, os_name: str) -> None:
+    """Pin the host platform so a test can lay out either runtime.
+
+    The lookup itself branches on the platform (Scripts/name.exe against
+    bin/name), so a test that only ever writes one layout passes on Windows
+    and fails on Linux.
+    """
+    from envxx.platforms import Platform
+
+    monkeypatch.setattr(
+        "envxx.cli.detect_platform", lambda: Platform(os_name, "x64")
+    )
+
+
+@pytest.mark.parametrize(
+    "os_name,script_dir,script_name",
+    [
+        ("windows", "Scripts", "envxx.exe"),
+        ("linux", "bin", "envxx"),
+    ],
+)
+def test_console_script_installed_by_pip_is_found(
+    tmp_path, monkeypatch, os_name, script_dir, script_name
+):
     # 'envxx python3.11 pip install -e .' then 'envxx python3.11 envxx' used to
     # hand 'envxx' to python as a script path, which died with Errno 2
     from envxx.cli import _dispatch_run
 
+    _force_platform(monkeypatch, os_name)
+
     version = "3.11.18"
     root = store.version_dir("python", version)
-    (root / "Scripts").mkdir(parents=True)
-    (root / "python.exe").write_bytes(b"")
-    (root / "Scripts" / "envxx.exe").write_bytes(b"")
+    (root / script_dir).mkdir(parents=True)
+    (root / script_dir / script_name).write_bytes(b"")
 
     calls = []
     monkeypatch.setattr(
@@ -397,18 +421,27 @@ def test_console_script_installed_by_pip_is_found(tmp_path, monkeypatch):
     assert calls == [(version, ["--version"], "envxx")]
 
 
-def test_a_name_that_is_not_a_console_script_stays_an_argument(tmp_path):
+@pytest.mark.parametrize(
+    "os_name,script_dir,script_name",
+    [
+        ("windows", "Scripts", "black.exe"),
+        ("linux", "bin", "black"),
+    ],
+)
+def test_a_name_that_is_not_a_console_script_stays_an_argument(
+    tmp_path, monkeypatch, os_name, script_dir, script_name
+):
     # an ordinary script path must still reach python untouched
-    from envxx.cli import _match_selector, _split_entrypoint
+    from envxx.cli import _match_selector, _provider, _split_entrypoint
+
+    _force_platform(monkeypatch, os_name)
 
     version = "3.11.18"
     root = store.version_dir("python", version)
-    (root / "Scripts").mkdir(parents=True)
-    (root / "Scripts" / "black.exe").write_bytes(b"")
+    (root / script_dir).mkdir(parents=True)
+    (root / script_dir / script_name).write_bytes(b"")
 
     spec, _ = _match_selector("python3.11")
-    from envxx.cli import _provider
-
     provider = _provider(spec)
     entry, args = _split_entrypoint(provider, version, ["script.py", "-v"])
     assert entry is None
