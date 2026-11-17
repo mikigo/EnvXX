@@ -76,12 +76,7 @@ class MobaXtermProvider(AppProvider):
             )
             for version in set(urls) | set(dates)
         ]
-        infos.sort(key=lambda info: version_key(info.version), reverse=True)
         return infos
-
-    def display_versions(self) -> list[VersionInfo]:
-        """Ascending, matching the runtime tools' search ordering."""
-        return sorted(self.search(), key=lambda info: version_key(info.version))
 
     def channels(self) -> list[VersionInfo]:
         return self.search()
@@ -89,15 +84,15 @@ class MobaXtermProvider(AppProvider):
     def resolve(self, query: str | None) -> str:
         """Only the builds the page links can actually be downloaded."""
         urls, _ = self._page()
-        downloadable = sorted(urls, key=version_key)
+        downloadable = sorted(urls, key=version_key, reverse=True)
         if query is None:
-            return downloadable[-1]
+            return downloadable[0]
 
         match = best_match(downloadable, query)
         if match is None:
             raise VersionNotFound(
                 f"xterm {query} cannot be downloaded: mobatek.net links only "
-                f"{', '.join(reversed(downloadable))}"
+                f"{', '.join(downloadable)}"
             )
         return match
 

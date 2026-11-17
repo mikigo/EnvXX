@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from ..errors import NetworkError
 from ..versions import version_key
-from .base import VersionedProvider
+from .base import VersionedProvider, latest_per_line
 from .spec import Asset, EntryPoint, InstallPlan, ToolSpec, VersionInfo
 
 _DIST = "https://nodejs.org/dist"
@@ -28,14 +28,8 @@ NODE_SPEC = ToolSpec(
 
 
 def _latest_per_major(infos: list[VersionInfo]) -> list[VersionInfo]:
-    """Keep the highest patch of each major line; order does not matter here."""
-    best: dict[int, VersionInfo] = {}
-    for info in infos:
-        major = version_key(info.version)[:1]
-        current = best.get(major[0])
-        if current is None or version_key(info.version) > version_key(current.version):
-            best[major[0]] = info
-    return sorted(best.values(), key=lambda info: version_key(info.version))
+    """Keep the highest patch of each major line, newest first."""
+    return latest_per_line(infos, depth=1)
 
 
 class NodeProvider(VersionedProvider):
@@ -68,11 +62,11 @@ class NodeProvider(VersionedProvider):
                     notes=str(entry.get("lts")),
                 )
             )
-        result.sort(key=lambda info: version_key(info.version))
+        # the base class sorts; returning in any order keeps this readable
         return result
 
     def display_versions(self) -> list[VersionInfo]:
-        """One row per major line, ascending: 20, 22, 24, 26."""
+        """One row per major line, newest first: 26, 24, 22, 20."""
         return _latest_per_major(self.search())
 
     def plan(self, version: str) -> InstallPlan:

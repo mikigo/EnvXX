@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 
 from ..errors import NetworkError, VersionNotFound
-from ..versions import version_key
 from .base import VersionedProvider
 from .spec import Asset, EntryPoint, InstallPlan, ToolSpec, VersionInfo
 
@@ -110,8 +109,7 @@ class PythonProvider(VersionedProvider):
             result.append(
                 VersionInfo(version=version, channel=channel, released=self._released)
             )
-        # ascending: oldest line first, newest last
-        result.sort(key=lambda info: version_key(info.version))
+        # order is set by the base class; only the contents matter here
         return result
 
     def plan(self, version: str) -> InstallPlan:

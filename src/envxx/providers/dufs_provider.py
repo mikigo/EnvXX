@@ -5,7 +5,6 @@ from pathlib import Path
 
 from .. import store
 from ..errors import NetworkError, VersionNotFound
-from ..versions import version_key
 from .base import AppProvider
 from .spec import Asset, EntryPoint, InstallPlan, ToolSpec, VersionInfo
 
@@ -82,12 +81,7 @@ class DufsProvider(AppProvider):
             raise NetworkError("dufs has no tagged releases")
 
         infos = [VersionInfo(version=version, channel="stable") for version in versions]
-        infos.sort(key=lambda info: version_key(info.version), reverse=True)
         return infos
-
-    def display_versions(self) -> list[VersionInfo]:
-        """Ascending, matching the runtime tools' search ordering."""
-        return sorted(self.search(), key=lambda info: version_key(info.version))
 
     def channels(self) -> list[VersionInfo]:
         return self.search()

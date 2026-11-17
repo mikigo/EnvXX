@@ -207,7 +207,7 @@ def test_claude_search_all_shows_everything(monkeypatch, capsys):
     assert "more, use --all" not in printed.err
 
 
-def test_runtime_search_stays_ascending(monkeypatch, capsys):
+def test_runtime_search_is_newest_first(monkeypatch, capsys):
     from envxx.platforms import Platform
     from envxx.providers.node_provider import NodeProvider
     from envxx.providers.spec import VersionInfo
@@ -219,7 +219,7 @@ def test_runtime_search_stays_ascending(monkeypatch, capsys):
     monkeypatch.setattr("envxx.cli._provider", lambda spec: Stub(Platform("windows", "x64")))
     assert main(["node", "search"]) == 0
     out = capsys.readouterr().out
-    assert out.index("20.19.0") < out.index("22.14.0") < out.index("24.22.3")
+    assert out.index("24.22.3") < out.index("22.14.0") < out.index("20.19.0")
 
 
 def test_search_hides_the_released_column_when_dates_are_missing(monkeypatch, capsys):

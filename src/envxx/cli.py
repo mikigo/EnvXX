@@ -212,19 +212,16 @@ def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
         provider = _provider(spec)
         # providers with huge catalogues serve a short recent list by default
         # and only walk the whole thing when --all is explicit
-        if all_versions and hasattr(provider, "search_all"):
+        if all_versions:
             infos = provider.search_all()
         else:
             infos = provider.display_versions()
+        # every catalogue is newest first, so an app list only needs trimming
         installed = set(store.installed_versions(spec.name))
         hidden = 0
-        if spec.kind == "app":
-            # app catalogues are long and only the newest matter: newest first,
-            # top SEARCH_LIMIT unless --all
-            infos = list(reversed(infos))
-            if not all_versions and len(infos) > SEARCH_LIMIT:
-                hidden = len(infos) - SEARCH_LIMIT
-                infos = infos[:SEARCH_LIMIT]
+        if spec.kind == "app" and not all_versions and len(infos) > SEARCH_LIMIT:
+            hidden = len(infos) - SEARCH_LIMIT
+            infos = infos[:SEARCH_LIMIT]
 
         table = Table(title=f"{spec.name} available", header_style="bold")
         table.add_column("version")
@@ -312,9 +309,11 @@ def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
                 out.print(f"{spec.name} {latest} is already the latest")
             else:
                 installer.install(provider, latest)
-            older = [v for v in installed if v != latest]
+            older = sorted(
+                (v for v in installed if v != latest), key=version_key, reverse=True
+            )
             if older:
-                joined = ", ".join(sorted(older, key=version_key, reverse=True))
+                joined = ", ".join(older)
                 err.print(
                     f"[dim]older versions still on disk: {joined}"
                     f" (envxx {spec.name} rm {older[0]} to remove)[/dim]"

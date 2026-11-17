@@ -53,14 +53,14 @@ def _node_provider(plat, monkeypatch):
 
 def test_node_filters_to_lts_and_platform(win, monkeypatch):
     versions = _node_provider(win, monkeypatch).search()
-    # ascending
-    assert [v.version for v in versions] == ["22.14.0", "24.22.3"]
+    # newest first
+    assert [v.version for v in versions] == ["24.22.3", "22.14.0"]
 
 
 def test_node_display_collapses_to_latest_per_major(win, monkeypatch):
     provider = _node_provider(win, monkeypatch)
     shown = [info.version for info in provider.display_versions()]
-    assert shown == ["22.14.0", "24.22.3"]
+    assert shown == ["24.22.3", "22.14.0"]
     assert provider.resolve("22.14.0") == "22.14.0"
 
 
@@ -74,7 +74,7 @@ def test_node_display_one_row_per_major(win, monkeypatch):
     ]
     monkeypatch.setattr("envxx.http.get_json", lambda *a, **k: index)
     shown = [info.version for info in NodeProvider(win).display_versions()]
-    assert shown == ["22.14.0", "24.22.3"]
+    assert shown == ["24.22.3", "22.14.0"]
 
 
 def test_node_excludes_non_lts(win, monkeypatch):
@@ -91,7 +91,7 @@ def test_node_excludes_old_majors(win, monkeypatch):
     ]
     monkeypatch.setattr("envxx.http.get_json", lambda *a, **k: index)
     versions = [v.version for v in NodeProvider(win).search()]
-    assert versions == ["20.19.0", "22.14.0"]
+    assert versions == ["22.14.0", "20.19.0"]
 
 
 @pytest.mark.parametrize(
@@ -156,8 +156,8 @@ def _python_provider(plat, monkeypatch):
 def test_python_picks_only_matching_triple(win, monkeypatch):
     provider = _python_provider(win, monkeypatch)
     versions = [info.version for info in provider.search()]
-    # ascending, oldest line first
-    assert versions == ["3.11.18", "3.12.16", "3.16.0a2"]
+    # newest first
+    assert versions == ["3.16.0a2", "3.12.16", "3.11.18"]
 
 
 def test_python_variant_preference(win, monkeypatch):
@@ -214,9 +214,9 @@ def test_claude_filters_to_releases(win, monkeypatch):
     assert versions == ["2.1.325", "2.1.323", "2.1.9"]
 
 
-def test_claude_display_versions_is_ascending(win, monkeypatch):
+def test_claude_display_versions_is_newest_first(win, monkeypatch):
     shown = [info.version for info in _claude_provider(win, monkeypatch).display_versions()]
-    assert shown == ["2.1.9", "2.1.323", "2.1.325"]
+    assert shown == ["2.1.325", "2.1.323", "2.1.9"]
 
 
 def test_claude_pages_through_the_catalogue(win, monkeypatch):
@@ -367,9 +367,9 @@ def test_opencode_search_all_walks_tags(win, monkeypatch):
     assert versions == ["2.3.0", "2.2.7", "2.2.6", "2.2.5"]
 
 
-def test_opencode_display_versions_is_ascending(win, monkeypatch):
+def test_opencode_display_versions_is_newest_first(win, monkeypatch):
     shown = [i.version for i in _opencode_provider(win, monkeypatch).display_versions()]
-    assert shown == ["2.2.6", "2.2.7", "2.3.0"]
+    assert shown == ["2.3.0", "2.2.7", "2.2.6"]
 
 
 def test_opencode_plan_fetches_release_digest(win, monkeypatch):
@@ -516,9 +516,9 @@ def test_cc_switch_lists_tagged_releases(win, monkeypatch):
     assert versions == ["4.0.33", "4.0.32", "4.0.31", "4.0.30", "4.0.29", "4.0.28"]
 
 
-def test_cc_switch_display_versions_is_ascending(win, monkeypatch):
+def test_cc_switch_display_versions_is_newest_first(win, monkeypatch):
     shown = [i.version for i in _cc_provider(win, monkeypatch).display_versions()]
-    assert shown == ["4.0.28", "4.0.29", "4.0.30", "4.0.31", "4.0.32", "4.0.33"]
+    assert shown == ["4.0.33", "4.0.32", "4.0.31", "4.0.30", "4.0.29", "4.0.28"]
 
 
 def test_cc_switch_picks_portable_not_msi(win, monkeypatch):
@@ -784,9 +784,9 @@ def test_dufs_lists_tags_newest_first(win, monkeypatch):
     assert versions == ["0.47.0", "0.46.0", "0.45.0"]
 
 
-def test_dufs_display_versions_is_ascending(win, monkeypatch):
+def test_dufs_display_versions_is_newest_first(win, monkeypatch):
     shown = [i.version for i in _dufs_provider(win, monkeypatch).display_versions()]
-    assert shown == ["0.45.0", "0.46.0", "0.47.0"]
+    assert shown == ["0.47.0", "0.46.0", "0.45.0"]
 
 
 @pytest.mark.parametrize(

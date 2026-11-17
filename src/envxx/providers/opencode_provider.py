@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 
 from ..errors import NetworkError, VersionNotFound
-from ..versions import version_key
 from .base import AppProvider
 from .spec import Asset, EntryPoint, InstallPlan, ToolSpec, VersionInfo
 
@@ -67,7 +66,6 @@ class OpencodeProvider(AppProvider):
         if not versions:
             raise NetworkError("unexpected opencode releases feed")
         infos = [VersionInfo(version=version, channel="stable") for version in versions]
-        infos.sort(key=lambda info: version_key(info.version), reverse=True)
         return infos
 
     def _all_versions(self) -> list[VersionInfo]:
@@ -95,7 +93,6 @@ class OpencodeProvider(AppProvider):
             page += 1
 
         infos = [VersionInfo(version=version, channel="stable") for version in versions]
-        infos.sort(key=lambda info: version_key(info.version), reverse=True)
         return infos
 
     def search_all(self) -> list[VersionInfo]:
@@ -103,10 +100,6 @@ class OpencodeProvider(AppProvider):
         self._full_catalogue = True
         self._versions = None
         return self.search()
-
-    def display_versions(self) -> list[VersionInfo]:
-        """Ascending, matching the runtime tools' search ordering."""
-        return sorted(self.search(), key=lambda info: version_key(info.version))
 
     def channels(self) -> list[VersionInfo]:
         return self.search()

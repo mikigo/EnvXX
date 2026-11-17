@@ -4,7 +4,6 @@ import re
 import urllib.parse
 
 from ..errors import NetworkError, VersionNotFound
-from ..versions import version_key
 from .base import AppProvider
 from .spec import Asset, EntryPoint, InstallPlan, ToolSpec, VersionInfo
 
@@ -62,12 +61,7 @@ class ClaudeProvider(AppProvider):
             for version in versions
             if _is_release(version)
         ]
-        infos.sort(key=lambda info: version_key(info.version), reverse=True)
         return infos
-
-    def display_versions(self) -> list[VersionInfo]:
-        """Ascending, matching the runtime tools' search ordering."""
-        return sorted(self.search(), key=lambda info: version_key(info.version))
 
     def channels(self) -> list[VersionInfo]:
         return self.search()

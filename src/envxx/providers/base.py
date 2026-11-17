@@ -5,13 +5,33 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from ..platforms import Platform
-from ..versions import best_match
+from ..versions import best_match, version_key
 from .spec import EntryPoint, InstallPlan, ToolSpec, VersionInfo
 
 # A console script name as package tooling writes it: 'envxx', 'pip-compile'.
 # No separators, and the first character cannot be a dot, so '..' cannot be
 # spelled to walk out of the version directory.
 _SCRIPT_NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
+
+
+def newest_first(infos: list[VersionInfo]) -> list[VersionInfo]:
+    """Sort a catalogue newest-first, the order every listing uses."""
+    return sorted(infos, key=lambda info: version_key(info.version), reverse=True)
+
+
+def latest_per_line(infos: list[VersionInfo], depth: int = 2) -> list[VersionInfo]:
+    """Keep the highest version of each line, newest first.
+
+    'depth' is how many leading components define a line: 1 collapses node to
+    20, 22, 24; 2 collapses go to 1.26, 1.27. Input order does not matter.
+    """
+    best: dict[tuple[int, ...], VersionInfo] = {}
+    for info in infos:
+        line = version_key(info.version)[:depth]
+        current = best.get(line)
+        if current is None or version_key(info.version) > version_key(current.version):
+            best[line] = info
+    return newest_first(list(best.values()))
 
 
 class Provider(ABC):
@@ -24,15 +44,29 @@ class Provider(ABC):
     # -- remote catalogue ------------------------------------------------
     @abstractmethod
     def _fetch_versions(self) -> list[VersionInfo]:
-        """Remote versions available for the current platform, newest first."""
+        """Versions available for the current platform; order is ours to set."""
 
     def search(self) -> list[VersionInfo]:
+        """The whole catalogue, newest first.
+
+        Sorting happens once, here, so a provider only has to return the
+        versions it found and every listing in the CLI agrees on direction.
+        """
         if self._versions is None:
-            self._versions = self._fetch_versions()
+            self._versions = newest_first(self._fetch_versions())
         return self._versions
 
     def display_versions(self) -> list[VersionInfo]:
         """Rows for 'envxx <tool> search'. Defaults to the full catalogue."""
+        return self.search()
+
+    def search_all(self) -> list[VersionInfo]:
+        """Rows for 'envxx <tool> search --all'.
+
+        display_versions may collapse a catalogue to one row per line; --all
+        is the escape hatch that asks for every version again. Providers that
+        never collapse inherit this unchanged.
+        """
         return self.search()
 
     # -- install planning ------------------------------------------------
@@ -118,11 +152,9 @@ class Provider(ABC):
     def default_version(self) -> str:
         """Highest stable version, or highest of anything if only prereleases exist.
 
-        Independent of display ordering: 'search' sorts ascending for python,
-        descending for node.
+        Picks by comparison rather than by taking the first row, so the
+        catalogue's order cannot change what 'install' with no version gets.
         """
-        from ..versions import version_key
-
         infos = self.search()
         if not infos:
             from ..errors import VersionNotFound
