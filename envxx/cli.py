@@ -184,11 +184,8 @@ def _fmt_size(size: int | None) -> str:
 
 
 def _display_path(path: Path) -> str:
-    """Show paths inside the store relative to it, so tables stay readable."""
-    try:
-        return "~/.envxx/" + path.relative_to(store.home()).as_posix()
-    except ValueError:
-        return str(path)
+    """Show paths inside the store relative to whichever root is in use."""
+    return store.display_path(path)
 
 
 def _dir_size(path: Path) -> int:
@@ -341,6 +338,69 @@ for _spec in tool_specs():
     )
     _add_tool_commands(_group, _spec)
     app.add_typer(_group, name=_spec.name)
+
+
+# ---------------------------------------------------------------------------
+# project store
+# ---------------------------------------------------------------------------
+def _ignore_line() -> str:
+    return store.PROJECT_DIR + "/"
+
+
+def _ensure_ignored(root: Path) -> str | None:
+    """Add the project store to root's .gitignore. Returns a message or None.
+
+    A project store holds executables under tools/, so a stray `git add .`
+    would commit binaries that anyone else running envxx in that checkout
+    would then execute. Writing the ignore line is the one place envxx can
+    prevent that without refusing to work.
+    """
+    path = root / ".gitignore"
+    line = _ignore_line()
+    if path.is_file():
+        text = path.read_text(encoding="utf-8", errors="replace")
+    else:
+        text = ""
+
+    present = {
+        entry.strip().rstrip("/")
+        for entry in text.splitlines()
+        if entry.strip() and not entry.strip().startswith("#")
+    }
+    if store.PROJECT_DIR in present:
+        return None
+
+    prefix = "" if not text or text.endswith("\n") else "\n"
+    path.write_text(f"{text}{prefix}{line}\n", encoding="utf-8")
+    return f"added {line} to {path.name}"
+
+
+@app.command("init")
+def init_cmd(
+    directory: Path | None = typer.Argument(
+        None, help="where to create .envxx (default: current directory)"
+    ),
+) -> None:
+    """Create a project-local .envxx, used in preference to the global one."""
+    root = (directory or Path.cwd()).resolve()
+    if not root.is_dir():
+        raise UsageError(f"not a directory: {root}")
+
+    try:
+        path, created = store.init_project(root)
+    except (ValueError, OSError) as exc:
+        raise UsageError(str(exc)) from None
+
+    if not created:
+        out.print(f"{path} already initialised")
+    else:
+        out.print(f"initialised {path}")
+        note = _ensure_ignored(root)
+        if note:
+            out.print(f"[dim]{note}[/dim]")
+    out.print(
+        "[dim]tool versions installed from here stay in this directory[/dim]"
+    )
 
 
 # ---------------------------------------------------------------------------

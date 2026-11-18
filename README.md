@@ -53,6 +53,7 @@ JDK 只列 17 以上的 LTS 线加上最新的特性版本，Adoptium 还在发�
 ## 命令
 
 ```bash
+envxx init                     # 在当前目录建项目级 .envxx
 envxx <tool> search            # 看远端有哪些版本
 envxx <tool> search --all      # 看完整版本历史
 envxx <tool> list              # 看本地已经下了哪些
@@ -88,7 +89,7 @@ envxx python3.11 black .
 
 ## 几个说明
 
-所有东西都在 `~/.envxx`：
+所有东西默认都在 `~/.envxx`：
 
 ```
 ~/.envxx/
@@ -99,6 +100,25 @@ envxx python3.11 black .
 ```
 
 `ENVXX_HOME` 可以改位置。
+
+## 每个项目一套
+
+项目里需要固定版本的运行时，又不希望污染全局的话：
+
+```bash
+cd my-project
+envxx init
+```
+
+会在当前目录建一个结构完全相同的 `.envxx/`，并把 `.envxx/` 追加进 `.gitignore`。之后在这个目录（以及它的任何子目录）里跑 `envxx python3.11`，用的都是项目内那一份。
+
+判断顺序是：`ENVXX_HOME` → 从当前目录向上找到的 `.envxx` → `~/.envxx`。
+
+`ENVXX_HOME` 排在最前面是故意的：它是每次调用显式指定的，CI 里设了它就不会因为仓库里恰好有个 `.envxx` 而换地方。
+
+向上查找只认带 `.project` 标记文件的目录，所以一个碰巧叫 `.envxx` 的目录不会被误当成 store。`envxx init` 发现已有目录但不是它建的，会报错退出，不会覆盖。
+
+`tools/` 里放的是可执行文件。`init` 自动写 `.gitignore` 是为了挡住误提交，但挡不住一个本来就带着工具二进制的仓库——clone 别人的项目后就地跑 `envxx` 之前，先看一眼 `.envxx/` 里有什么。
 
 国内网络慢的话留了镜像变量：
 

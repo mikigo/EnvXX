@@ -108,11 +108,10 @@ def install(provider: Provider, version: str, *, quiet: bool = False) -> Path:
                 shutil.rmtree(staging, ignore_errors=True)
 
     if not quiet:
-        try:
-            shown = "~/.envxx/" + target.relative_to(store.home()).as_posix()
-        except ValueError:
-            shown = str(target)
-        console.print(f"[green]installed[/green] {tool} {version} -> {shown}")
+        console.print(
+            f"[green]installed[/green] {tool} {version} -> "
+            f"{store.display_path(target)}"
+        )
     return target
 
 

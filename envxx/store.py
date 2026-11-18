@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import errno
+import json
 import os
 import shutil
 import stat
@@ -13,11 +14,112 @@ from .errors import LockTimeout
 
 HOME_ENV = "ENVXX_HOME"
 
+# Name of the directory a project opts into, and the file that proves envxx
+# created it. The marker matters because any directory could be called
+# '.envxx'; without it a stray one would hijack the store for everything
+# below it.
+PROJECT_DIR = ".envxx"
+MARKER = ".project"
+SCHEMA = 1
+
+
+def global_home() -> Path:
+    return Path.home() / PROJECT_DIR
+
+
+def _is_project_store(path: Path) -> bool:
+    return (path / MARKER).is_file()
+
+
+def project_store(start: Path | None = None) -> Path | None:
+    """The nearest initialised .envxx at or above start, if any.
+
+    Walking upwards means 'envxx node22' behaves the same in the project root
+    and in a subdirectory. The home directory is excluded on purpose: its
+    .envxx *is* the global store, and treating it as project-level would make
+    the same directory report two different origins.
+    """
+    current = (start or Path.cwd()).resolve()
+    stop = Path.home().resolve()
+    for candidate in (current, *current.parents):
+        if candidate == stop:
+            return None
+        store = candidate / PROJECT_DIR
+        if store.is_dir() and _is_project_store(store):
+            return store
+    return None
+
 
 def home() -> Path:
-    """Root of the envxx store, ~/.envxx unless ENVXX_HOME is set."""
+    """Root of the envxx store.
+
+    ENVXX_HOME wins because it is set deliberately per invocation; a project
+    store is discovered from the working directory and is a convenience, not
+    a request. CI that pins ENVXX_HOME therefore keeps working inside a
+    checkout that happens to carry a .envxx.
+    """
     override = os.environ.get(HOME_ENV)
-    return Path(override).expanduser() if override else Path.home() / ".envxx"
+    if override:
+        return Path(override).expanduser()
+    return project_store() or global_home()
+
+
+def home_origin() -> str:
+    """Where home() came from: 'env', 'project' or 'global'.
+
+    The CLI shows paths relative to whichever root is in use, and the three
+    cases look different: '~/.envxx/...', './.envxx/...', or an absolute path
+    the user chose themselves.
+    """
+    if os.environ.get(HOME_ENV):
+        return "env"
+    return "project" if project_store() else "global"
+
+
+def display_path(path: Path) -> str:
+    """Render a store path in terms the current origin makes readable."""
+    root = home()
+    try:
+        relative = path.relative_to(root).as_posix()
+    except ValueError:
+        return str(path)
+
+    origin = home_origin()
+    if origin == "global":
+        return "~/.envxx/" + relative
+    if origin == "project":
+        return "./.envxx/" + relative
+    return str(path)
+
+
+def init_project(root: Path | None = None) -> tuple[Path, bool]:
+    """Create a project store under root (default: cwd).
+
+    Returns (store_path, created). Idempotent: an initialised store is
+    reported untouched. A '.envxx' that envxx did not make is refused rather
+    than absorbed, since filling someone else's directory with tool binaries
+    is not something the user asked for.
+    """
+    base = (root or Path.cwd()).resolve()
+    store = base / PROJECT_DIR
+
+    if store.is_file():
+        raise ValueError(f"{store} is a file, not a directory")
+    if store.is_dir():
+        if _is_project_store(store):
+            return store, False
+        raise ValueError(
+            f"{store} already exists but was not created by envxx "
+            f"(no {MARKER}); move it aside or remove it first"
+        )
+
+    store.mkdir(parents=True)
+    for sub in ("tools", "downloads", "cache", ".locks"):
+        (store / sub).mkdir()
+    (store / MARKER).write_text(
+        json.dumps({"schema": SCHEMA}) + "\n", encoding="utf-8"
+    )
+    return store, True
 
 
 def tools_dir() -> Path:

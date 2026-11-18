@@ -14,6 +14,24 @@ def isolated_home(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def never_touch_the_real_store(tmp_path, request):
+    """Catch a test that lost its sandbox.
+
+    A project store is discovered from the working directory now, so a test
+    that clears ENVXX_HOME and changes into a directory tree could write into
+    the developer's own ~/.envxx. Tests that exercise discovery on purpose set
+    this marker; everything else must stay inside tmp_path.
+    """
+    yield
+    if request.node.get_closest_marker("real_store"):
+        return
+    home = store.home()
+    assert str(home).startswith(str(tmp_path)), (
+        f"test resolved the store to {home}, outside its tmp_path"
+    )
+
+
+@pytest.fixture(autouse=True)
 def no_network(request, monkeypatch):
     """Fail fast if a test reaches the network without @pytest.mark.network.
 
@@ -27,3 +45,10 @@ def no_network(request, monkeypatch):
         raise AssertionError("network access in a unit test")
 
     monkeypatch.setattr(http, "client", blocked)
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "real_store: test exercises store discovery outside its own tmp_path",
+    )
