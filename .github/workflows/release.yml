@@ -65,9 +65,9 @@ jobs:
       - name: build
         run: >
           pyinstaller --clean --noconfirm --onefile --name envxx
-          --paths src --hidden-import envxx
+          --paths . --hidden-import envxx
           --distpath dist --workpath build/work --specpath build
-          src/envxx/__main__.py
+          envxx/__main__.py
 
       # A frozen entry point runs without package context, so this catches the
       # relative-import breakage that only shows up in the bundled binary.

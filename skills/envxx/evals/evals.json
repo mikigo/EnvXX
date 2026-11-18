@@ -1,0 +1,33 @@
+{
+  "skill_name": "envxx",
+  "evals": [
+    {
+      "id": 0,
+      "eval_name": "run-python-without-install",
+      "prompt": "我机器上没装 Python，但手上有个脚本要跑：`python analyze.py --input data.csv`。有没有办法不全局安装就能跑起来？项目在 C:\\Users\\Administrator\\Desktop\\code\\EnvXX 里，你先看看这个仓库是干什么的。",
+      "expected_output": "识别出仓库本身是 EnvXX，用 envxx 的选择器语法运行 python3.11 之类，而不是建议安装 Python 或写死系统路径。",
+      "files": []
+    },
+    {
+      "id": 1,
+      "eval_name": "multi-runtime-setup",
+      "prompt": "我要在这台 Windows 机器上同时准备 Node 22 和 Node 24 两个版本，还要 Go 1.27 和 JDK 21，都别装到系统里。装完告诉我怎么确认每个都跑起来了，命令给我。",
+      "expected_output": "用 envxx 的 install/search/where 和版本选择器，给出可执行的命令序列，并说明 ~/.envxx 的位置。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "eval_name": "add-new-provider",
+      "prompt": "EnvXX 这个项目我想加个 ripgrep 的支持，官方 release 里有各个平台的 zip 包。帮我看看该怎么加，需要改哪些文件，注意什么。",
+      "expected_output": "说出 ToolSpec/Provider 的结构、注册表位置、strip_top 判断、平台映射、测试写法，指向 providers 目录里的模板文件。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "eval_name": "debug-missing-entrypoint",
+      "prompt": "我在 EnvXX 仓库里 `envxx jdk21 java -version` 报错说 has no java，但 Windows 上装的时候明明成功了。这是怎么回事？怎么修？",
+      "expected_output": "指出可能是入口路径不对（macOS bundle 布局 vs Windows bin/），引导查看 entrypoint_candidates 和实际解包结构。",
+      "files": []
+    }
+  ]
+}

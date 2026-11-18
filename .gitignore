@@ -219,3 +219,6 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 envxx-windows-x64.exe
+
+# skill evaluation workspace, regenerated per run
+envxx-workspace/

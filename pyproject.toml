@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "envxx"
-version = "0.1.0"
+version = "1.0.7"
 description = "Portable multi-runtime manager for Python, Node.js and friends"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -24,7 +24,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/envxx"]
+packages = ["envxx"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
