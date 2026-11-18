@@ -3,6 +3,7 @@ from __future__ import annotations
 import errno
 import os
 import shutil
+import stat
 import time
 import uuid
 from contextlib import contextmanager
@@ -77,7 +78,28 @@ def ensure_dirs() -> None:
 
 
 def remove_version(tool: str, version: str) -> None:
-    shutil.rmtree(version_dir(tool, version), ignore_errors=True)
+    """Delete a version directory, making read-only files writable first.
+
+    rmtree with ignore_errors would leave the directory behind on Windows
+    whenever something in it is read-only (extracted archives keep their
+    mode bits), and the caller would then see a directory that exists but
+    is incomplete. Clear the flag instead and let a real failure surface.
+    """
+    root = version_dir(tool, version)
+    if not root.is_dir():
+        return
+
+    def _force_writable(function: object, path: str, _exc: object) -> None:
+        # the retry gets one chance after the read-only bit is cleared
+        os.chmod(path, stat.S_IWRITE)
+        function(path)  # type: ignore[operator]
+
+    if os.name == "nt":
+        # onerror is deprecated in 3.12 but onexc does not exist before it,
+        # and this project still supports 3.10
+        shutil.rmtree(root, onerror=_force_writable)
+    else:
+        shutil.rmtree(root)
 
 
 def temp_dir(tool: str) -> Path:

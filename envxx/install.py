@@ -51,16 +51,32 @@ def _cache_name(version: str, filename: str) -> str:
 
 
 def install(provider: Provider, version: str, *, quiet: bool = False) -> Path:
-    """Install a version and return its directory. No-op if already present."""
+    """Install a version and return its directory. No-op if already present.
+
+    A version directory only counts as installed when its entrypoints are
+    actually there. An interrupted download, a full disk or a deleted file
+    can leave the directory in place while the binary is missing, and
+    trusting the directory alone would make that state permanent: install
+    would keep saying nothing is wrong and the launch would keep failing.
+    """
     tool = provider.spec.name
     target = store.version_dir(tool, version)
-    if target.is_dir():
+    if _is_complete(provider, version, target):
         return target
+    if target.is_dir():
+        if not quiet:
+            console.print(
+                f"[yellow]{tool} {version} is present but incomplete, reinstalling[/yellow]"
+            )
+        store.remove_version(tool, version)
 
     store.ensure_dirs()
     with store.install_lock(tool, version):
-        if target.is_dir():  # another process finished while we waited
+        # another process may have finished while we waited
+        if _is_complete(provider, version, target):
             return target
+        if target.is_dir():
+            store.remove_version(tool, version)
 
         plan = provider.plan(version)
         asset = plan.asset
@@ -98,6 +114,17 @@ def install(provider: Provider, version: str, *, quiet: bool = False) -> Path:
             shown = str(target)
         console.print(f"[green]installed[/green] {tool} {version} -> {shown}")
     return target
+
+
+def _is_complete(provider: Provider, version: str, target: Path) -> bool:
+    """True when the directory holds a usable install, not just a name."""
+    if not target.is_dir():
+        return False
+    try:
+        _verify_entrypoints(provider, version, target)
+    except InstallError:
+        return False
+    return True
 
 
 def _verify_entrypoints(provider: Provider, version: str, staging: Path) -> None:
