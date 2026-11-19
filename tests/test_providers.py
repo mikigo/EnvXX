@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from envxx import store
-from envxx.errors import UnsupportedPlatform
+from envxx.errors import NetworkError, UnsupportedPlatform, VersionNotFound
 from envxx.platforms import Platform
 from envxx.providers import provider_for
 from envxx.providers.cc_switch_provider import CcSwitchProvider
@@ -1434,3 +1434,116 @@ def test_dbeaver_is_registered():
     assert isinstance(
         provider_for("dbeaver", Platform("windows", "x64")), DbeaverProvider
     )
+
+
+# -- python: versions dropped by newer releases ------------------------------
+def _pbs_asset(version, build, triple="x86_64-pc-windows-msvc"):
+    return {
+        "name": f"cpython-{version}+{build}-{triple}-install_only.tar.gz",
+        "browser_download_url": f"https://example.invalid/{version}.tar.gz",
+        "digest": "sha256:abc",
+        "size": 1,
+    }
+
+
+def _python_with_history(monkeypatch, pages, latest_versions=("3.12.16",)):
+    """A provider whose 'latest' is small and whose history is paginated."""
+    def fake_json(url, cache_key, ttl=86400, missing_ok=False):
+        if "releases/latest" in url:
+            return {
+                "published_at": "2026-11-11T00:00:00Z",
+                "assets": [_pbs_asset(v, "20261110") for v in latest_versions],
+            }
+        page = int(url.rsplit("page=", 1)[1])
+        return pages.get(page, [])
+
+    monkeypatch.setattr("envxx.http.get_json", fake_json)
+    return PythonProvider(Platform("windows", "x64"))
+
+
+def test_search_does_not_walk_history(win, monkeypatch):
+    """search must stay cheap: no history requests unless a version is asked for."""
+    pages: dict[int, list] = {}
+    seen: list[str] = []
+
+    def fake_json(url, cache_key, ttl=86400, missing_ok=False):
+        if "releases/latest" in url:
+            return {"assets": [_pbs_asset("3.12.16", "20261110")]}
+        seen.append(url)
+        return pages.get(int(url.rsplit("page=", 1)[1]), [])
+
+    monkeypatch.setattr("envxx.http.get_json", fake_json)
+    provider = PythonProvider(Platform("windows", "x64"))
+    provider.search()
+
+    assert seen == []
+
+
+def test_a_dropped_line_is_found_in_an_older_release(win, monkeypatch):
+    pages = {1: [{"assets": [_pbs_asset("3.10.14", "20241016"),
+                             _pbs_asset("3.9.20", "20241016")]}]}
+    provider = _python_with_history(monkeypatch, pages)
+
+    assert provider.resolve("3.10") == "3.10.14"
+    assert provider.resolve("3.9") == "3.9.20"
+
+
+def test_a_dropped_line_resolves_to_its_newest_build(win, monkeypatch):
+    # two releases carry 3.10; the walk stops at the first, which is newest
+    pages = {
+        1: [{"assets": [_pbs_asset("3.10.14", "20241016")]}],
+        2: [{"assets": [_pbs_asset("3.10.12", "20240415")]}],
+    }
+    provider = _python_with_history(monkeypatch, pages)
+
+    assert provider.resolve("3.10") == "3.10.14"
+
+
+def test_the_walk_stops_after_the_first_release_that_has_the_line(win, monkeypatch):
+    fetched: list[int] = []
+
+    def fake_json(url, cache_key, ttl=86400, missing_ok=False):
+        if "releases/latest" in url:
+            return {"assets": [_pbs_asset("3.12.16", "20261110")]}
+        page = int(url.rsplit("page=", 1)[1])
+        fetched.append(page)
+        if page == 1:
+            return [{"assets": [_pbs_asset("3.10.14", "20241016")]}]
+        return [{"assets": [_pbs_asset("3.9.20", "20241016")]}]
+
+    monkeypatch.setattr("envxx.http.get_json", fake_json)
+    provider = PythonProvider(Platform("windows", "x64"))
+    provider.resolve("3.10")
+
+    assert fetched == [1]
+
+
+def test_a_history_build_can_be_planned(win, monkeypatch):
+    pages = {1: [{"assets": [_pbs_asset("3.10.14", "20241016")]}]}
+    provider = _python_with_history(monkeypatch, pages)
+
+    version = provider.resolve("3.10")
+    plan = provider.plan(version)
+    assert plan.asset.filename == "cpython-3.10.14+20241016-x86_64-pc-windows-msvc-install_only.tar.gz"
+    assert plan.asset.sha256 == "abc"
+
+
+def test_an_unknown_line_still_fails(win, monkeypatch):
+    pages = {1: [{"assets": [_pbs_asset("3.9.20", "20241016")]}]}
+    provider = _python_with_history(monkeypatch, pages)
+
+    with pytest.raises(VersionNotFound):
+        provider.resolve("3.7")
+
+
+def test_an_unreachable_history_page_does_not_mask_a_real_miss(win, monkeypatch):
+    def fake_json(url, cache_key, ttl=86400, missing_ok=False):
+        if "releases/latest" in url:
+            return {"assets": [_pbs_asset("3.12.16", "20261110")]}
+        raise NetworkError("gateway timeout")
+
+    monkeypatch.setattr("envxx.http.get_json", fake_json)
+    provider = PythonProvider(Platform("windows", "x64"))
+
+    with pytest.raises(VersionNotFound):
+        provider.resolve("3.10")

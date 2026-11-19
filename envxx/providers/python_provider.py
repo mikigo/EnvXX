@@ -3,10 +3,24 @@ from __future__ import annotations
 import re
 
 from ..errors import NetworkError, VersionNotFound
+from ..versions import version_key
 from .base import VersionedProvider
 from .spec import Asset, EntryPoint, InstallPlan, ToolSpec, VersionInfo
 
 _RELEASES = "https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest"
+
+# Older versions are no longer rebuilt by newer releases: 3.8/3.9/3.10 stopped
+# appearing once upstream dropped them, and their last builds sit in a
+# date-tagged release further back. Walking that history costs a few MB per
+# page, so it happens only when a query actually asks for a version the newest
+# release does not carry.
+_RELEASES_PAGE = "https://api.github.com/repos/astral-sh/python-build-standalone/releases"
+# Each release lists several hundred platform assets, so one page is a few
+# megabytes and can take a minute on a slow link. Smaller pages keep a single
+# failed request from costing the whole hunt.
+_HISTORY_PAGE = 5
+# how far back to walk when hunting a dropped version line
+_HISTORY_LIMIT = 120
 
 PYTHON_SPEC = ToolSpec(
     name="python",
@@ -68,6 +82,8 @@ class PythonProvider(VersionedProvider):
         super().__init__(platform)
         self._by_version: dict[str, list[tuple[int, dict]]] | None = None
         self._released: str | None = None
+        # versions found by walking the release history, keyed like the index
+        self._history: dict[str, list[tuple[int, dict]]] = {}
 
     def _index(self) -> dict[str, list[tuple[int, dict]]]:
         """version -> [(variant rank, asset)] for this platform, non-freethreaded."""
@@ -84,6 +100,11 @@ class PythonProvider(VersionedProvider):
         if data.get("published_at"):
             self._released = str(data["published_at"])[:10]
 
+        self._by_version = self._assets_to_index(assets)
+        return self._by_version
+
+    def _assets_to_index(self, assets: list[dict]) -> dict[str, list[tuple[int, dict]]]:
+        """Keep the assets for this platform, skipping freethreaded variants."""
         triples = set(self.platform.python_triples)
         index: dict[str, list[tuple[int, dict]]] = {}
         for asset in assets:
@@ -99,7 +120,6 @@ class PythonProvider(VersionedProvider):
             index.setdefault(match.group("version"), []).append(
                 (_variant_rank(variant), asset)
             )
-        self._by_version = index
         return index
 
     def _fetch_versions(self) -> list[VersionInfo]:
@@ -112,9 +132,99 @@ class PythonProvider(VersionedProvider):
         # order is set by the base class; only the contents matter here
         return result
 
+    # -- older releases --------------------------------------------------
+    def _load_history(self, wanted_line: tuple[int, ...]) -> None:
+        """Walk old releases until one carries `wanted_line`'s last build.
+
+        Upstream stops rebuilding a version line once it goes out of support,
+        so 3.8/3.9/3.10 live only in older date-tagged releases. Each page is
+        a few MB of assets, which is why this runs only when a query actually
+        asks for a missing line and not on every 'search'.
+
+        Stops at the first release that carries the line: that release holds
+        the newest build of it, and anything further back is older still.
+        """
+        from .. import http
+
+        line_len = len(wanted_line)
+        seen = 0
+        page = 1
+        while seen < _HISTORY_LIMIT:
+            try:
+                batch = http.get_json(
+                    f"{_RELEASES_PAGE}?per_page={_HISTORY_PAGE}&page={page}",
+                    f"python-history-{page}",
+                )
+            except NetworkError:
+                # one unreachable page should not sink the hunt; the caller
+                # reports VersionNotFound if the rest never mentions the line
+                return
+            if not isinstance(batch, list):
+                raise NetworkError("unexpected python-build-standalone history")
+            if not batch:
+                return
+
+            for release in batch:
+                assets = release.get("assets")
+                if not isinstance(assets, list):
+                    continue
+                index = self._assets_to_index(assets)
+                if not index:
+                    continue
+
+                hit = [
+                    version
+                    for version in index
+                    if version_key(version)[:line_len] == wanted_line
+                ]
+                if hit:
+                    # keep the newest build of the line found in this release
+                    best = max(hit, key=version_key)
+                    self._history[best] = index[best]
+                    return
+
+            seen += len(batch)
+            if len(batch) < _HISTORY_PAGE:
+                return
+            page += 1
+
+    def _find_older(self, query: str) -> str | None:
+        """The newest build matching `query`, read from the release history."""
+        wanted = version_key(query)
+        if not wanted:
+            return None
+
+        def matches() -> list[str]:
+            return [
+                version
+                for version in self._history
+                if version_key(version)[: len(wanted)] == wanted
+            ]
+
+        found = matches()
+        if not found:
+            self._load_history(wanted)
+            found = matches()
+        return max(found, key=version_key) if found else None
+
+    def resolve(self, query: str | None) -> str:
+        try:
+            return super().resolve(query)
+        except VersionNotFound:
+            if not query:
+                raise
+            # only a missing version line is worth the cost of reading
+            # history; a typo or an unbuildable platform should fail fast
+            found = self._find_older(query)
+            if found is None:
+                raise
+            return found
+
     def plan(self, version: str) -> InstallPlan:
-        candidates = self._index().get(version)
+        candidates = self._index().get(version) or self._history.get(version)
         if not candidates:
+            # 'plan' can be called straight after a successful resolve that
+            # came from history; anything else still needs the full lookup
             raise VersionNotFound(
                 f"python {version} has no build for {self.platform.tag}"
             )

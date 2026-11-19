@@ -62,6 +62,8 @@ JDK 只列 17 以上的 LTS 线加上最新的特性版本，Adoptium 还在发�
 
 版本多的运行时（Go、JDK、uv、Bun、Node）默认每个版本线只显示最新一个补丁版，比如 Go 显示 `1.27.4` 而不是 1.27 线的全部；`search --all` 才是完整列表。
 
+Python 有个额外情况：python-build-standalone 每次发版只打包还在维护的版本线，所以最新 release 里没有 3.8/3.9/3.10。这些版本的最后一个构建留在更早的 release 里。`search` 只读最新 release（快），但当你明确要一个列表里没有的版本时（`envxx python3.10 ...` 或 `envxx python install 3.10`），EnvXX 会往回翻 release 历史，找到就停。翻页比较慢（每页几 MB），所以只在真的要装旧版时才发生。
+
 加新工具不用动命令行解析。写一个 provider，登记进注册表就行。ripgrep、fd、fzf 这些单文件工具都在候选名单里，只是我还没用到。
 
 ## 命令
