@@ -44,6 +44,7 @@ envxx claude
 | Notepad-- | `notepad--`、`ndd` | `notepad--` | GitHub Release 便携版 |
 | MarkText | `marktext`、`mt` | `marktext` | GitHub Release 便携版 |
 | DBeaver | `dbeaver` | `dbeaver` | GitHub Release 便携版 |
+| Git for Windows | `git` | `git`、`scalar` | GitHub Release 便携版 |
 | dufs | `dufs` | `dufs` | GitHub Release 压缩包 |
 
 另外几个只下载安装包、不代你安装的：
@@ -162,6 +163,10 @@ envxx 7zip where     # 安装包放在哪
 - 重复 `install` 不会重新下载，文件已经在就跳过。这类工具没有多版本并存的概念，`downloads/` 里同名文件只会有最新那一份。
 
 微信和企业微信没有可查的历史版本，页面上只挂当前这一版，所以 `search` 只有一行。VS Code 和 7-Zip 能列出全部版本或当前构建。VS Code 在 Windows 上给的是 user 安装包（不需要管理员权限），macOS 给的是 zip。
+
+Git for Windows 用的是 MinGit（`MinGit-*.zip`），不是安装器也不是 PortableGit。后两者一个要跑安装向导、一个是自解压 exe，只有 MinGit 是普通 zip，解开就能用。它是精简构建，没有 GUI 和 Perl，但 `git` 本身是完整的。压缩包是平铺的，`cmd/`、`usr/`、`ucrt64/` 直接在根，入口是 `cmd/git.exe`。
+
+它的版本号带重打包序号，比如 `2.56.0.windows.4`。这不是噪音：`2.56.0` 被重新打包过四次，`v2.56.0.windows.1` 到 `.4` 是四个不同的构建，所以版本号保留完整形式。`search` 默认每个上游版本只显示最新一次重打包，`--all` 才列出全部。装的时候也注意文件名的规律：`v2.56.0.windows.1` 对应 `MinGit-2.56.0-64-bit.zip`（第一次重打包不带序号），而 `.4` 对应 `MinGit-2.56.0.4-64-bit.zip`。
 
 ## 用 pip 装进去的东西
 

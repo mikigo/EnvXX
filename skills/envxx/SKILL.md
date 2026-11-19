@@ -99,7 +99,7 @@ envxx python3.11 black .
 ### 支持的工具
 
 运行时（可多版本并存）：`python`、`node`、`go`、`jdk`、`uv`、`bun`
-应用（留最新即可）：`claude`、`opencode`、`cc-switch`、`xterm`、`wt`、`notepad--`、`marktext`、`dbeaver`、`dufs`
+应用（留最新即可）：`claude`、`opencode`、`cc-switch`、`xterm`、`wt`、`notepad--`、`marktext`、`dbeaver`、`git`、`dufs`
 
 `xterm`、`wt`、`notepad--` 只有 Windows 版。`dbeaver` 支持 Windows 和 Linux，macOS 上会报不支持（官方只发 dmg）。`marktext` 三个平台都有。这些限制来自上游发了什么资产，不要假设它们跨平台。
 
@@ -114,7 +114,10 @@ envxx python3.11 black .
 - `list` 显示已下载的安装包，`where` 给出文件路径。
 - 没下载过时 `where` 会报错并提示先 `install`。
 - 微信和企业微信的目录只有当前版本，`search` 只有一行；VS Code 和 7-Zip 能列历史。
+- Git 的版本号带重打包序号（`2.56.0.windows.4`），这是标识的一部分，不要截短成 `2.56.0` 去查。
 - 这类工具不占 `tools/`，删 `downloads/` 里的文件就能清掉。
+
+`git` 不在这一类。它用的是 MinGit zip，解包后是绿色版，`envxx git2.56 version` 能直接运行。Windows 上的 Git 有三种发布形式（安装器、PortableGit 自解压 exe、MinGit zip），只有最后一个是普通压缩包。
 
 ### Store 位置
 
