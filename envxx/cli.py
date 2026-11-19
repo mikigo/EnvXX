@@ -12,6 +12,7 @@ from rich.table import Table
 
 from ._click import ClickExit, ClickNoArgsIsHelp, ClickUsageError
 
+from . import __version__
 from . import install as installer
 from . import run as runner
 from . import store
@@ -503,6 +504,12 @@ def _silence_streams() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+
+    # answered before dispatch: 'envxx --version' must not be mistaken for a
+    # flag meant for a tool, and there is no tool named by it anyway
+    if argv and argv[0] in ("--version", "-V"):
+        typer.echo(f"envxx {__version__}")
+        return 0
 
     try:
         if argv:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -126,52 +127,92 @@ def test_node_entrypoints_per_os(win, linux):
 
 
 # -- python ------------------------------------------------------------------
-def _pbs_payload():
-    def asset(name, digest="sha256:abc"):
-        return {
-            "name": name,
-            "size": 100,
-            "digest": digest,
-            "browser_download_url": f"https://github.com/dl/{name}",
-        }
-
-    return {
-        "published_at": "2026-11-11T00:00:00Z",
-        "assets": [
-            asset("cpython-3.11.18+20261110-x86_64-pc-windows-msvc-install_only.tar.gz"),
-            asset("cpython-3.11.18+20261110-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"),
-            asset("cpython-3.11.18+20261110-x86_64-pc-windows-msvc-freethreaded-install_only.tar.gz"),
-            asset("cpython-3.11.18+20261110-aarch64-pc-windows-msvc-install_only.tar.gz"),
-            asset("cpython-3.11.18+20261110-x86_64-apple-darwin-install_only.tar.gz"),
-            asset("cpython-3.12.16+20261110-x86_64-pc-windows-msvc-install_only.tar.gz"),
-            asset("cpython-3.16.0a2+20261110-x86_64-pc-windows-msvc-install_only.tar.gz"),
-            asset("cpython-3.11.18+20261110-x86_64-pc-windows-msvc-debug-full.tar.zst"),
-            asset("cpython-3.11.18+20261110-x86_64-pc-windows-msvc-install_only.tar.gz.sha256"),
-        ],
-    }
+def _pbs_row(version, build, platform="x86_64-pc-windows-msvc",
+             variant="install_only", fmt="tar.gz", sha="abc"):
+    """One NDJSON row from the Astral index."""
+    name = f"cpython-{version}+{build}-{platform}-{variant}.{fmt}"
+    return json.dumps({
+        "version": f"{version}+{build}",
+        "date": "2026-11-11T00:00:00Z",
+        "artifacts": [{
+            "platform": platform,
+            "variant": variant,
+            "archive_format": fmt,
+            "url": "https://github.com/dl/" + name.replace("+", "%2B"),
+            "sha256": sha,
+        }],
+    })
 
 
-def _python_provider(plat, monkeypatch):
+def _ndjson(*rows) -> str:
+    return "\n".join(rows) + "\n"
+
+
+_PYTHON_INDEX = _ndjson(
+    _pbs_row("3.11.18", "20261110"),
+    _pbs_row("3.11.18", "20261110", variant="install_only_stripped"),
+    _pbs_row("3.11.18", "20261110", variant="freethreaded+install_only"),
+    # another platform must not leak in
+    _pbs_row("3.11.18", "20261110", platform="aarch64-pc-windows-msvc"),
+    _pbs_row("3.11.18", "20261110", platform="x86_64-apple-darwin"),
+    # other formats are not installable trees
+    _pbs_row("3.11.18", "20261110", variant="debug+full", fmt="tar.zst"),
+    _pbs_row("3.12.16", "20261110"),
+    _pbs_row("3.16.0a2", "20261110"),
+    # an older build of the same patch: still the same version to the user
+    _pbs_row("3.10.22", "20261001"),
+    _pbs_row("3.10.22", "20261009"),
+    _pbs_row("3.9.25", "20251031"),
+    _pbs_row("3.8.20", "20241002"),
+)
+
+
+def _python_provider(plat, monkeypatch, index=_PYTHON_INDEX):
     provider = PythonProvider(plat)
-    monkeypatch.setattr("envxx.http.get_json", lambda *a, **k: _pbs_payload())
+    monkeypatch.setattr("envxx.http.get_text", lambda *a, **k: index)
     return provider
 
 
 def test_python_picks_only_matching_triple(win, monkeypatch):
     provider = _python_provider(win, monkeypatch)
     versions = [info.version for info in provider.search()]
-    # newest first
-    assert versions == ["3.16.0a2", "3.12.16", "3.11.18"]
+    # newest first, one entry per version even when several builds exist
+    assert versions == [
+        "3.16.0a2", "3.12.16", "3.11.18", "3.10.22", "3.9.25", "3.8.20",
+    ]
+
+
+def test_python_has_versions_the_latest_release_no_longer_builds(win, monkeypatch):
+    """3.8/3.9/3.10 are absent from newer GitHub releases but present here."""
+    versions = [info.version for info in _python_provider(win, monkeypatch).search()]
+    assert "3.8.20" in versions
+    assert "3.9.25" in versions
+    assert "3.10.22" in versions
 
 
 def test_python_variant_preference(win, monkeypatch):
     provider = _python_provider(win, monkeypatch)
     plan = provider.plan("3.11.18")
-    assert plan.asset.filename.endswith(
-        "x86_64-pc-windows-msvc-install_only.tar.gz"
-    )
+    # install_only wins over install_only_stripped and freethreaded
+    assert plan.asset.filename.endswith("x86_64-pc-windows-msvc-install_only.tar.gz")
+    assert "-freethreaded-" not in plan.asset.filename
     assert plan.asset.format == "tar.gz"
     assert plan.asset.sha256 == "abc"
+
+
+def test_python_filename_decodes_the_build_separator(win, monkeypatch):
+    provider = _python_provider(win, monkeypatch)
+    plan = provider.plan("3.10.22")
+    # the URL carries %2B where the file name has '+'
+    assert "%2B" not in plan.asset.filename
+    assert "+" in plan.asset.filename
+
+
+def test_python_skips_archives_that_are_not_installable(win, monkeypatch):
+    provider = _python_provider(win, monkeypatch)
+    plan = provider.plan("3.11.18")
+    assert plan.asset.format == "tar.gz"
+    assert not plan.asset.filename.endswith(".tar.zst")
 
 
 def test_python_prerelease_not_default(win, monkeypatch):
@@ -189,10 +230,21 @@ def test_python_missing_version(win, monkeypatch):
         provider.plan("3.13.18")
 
 
+def test_python_display_collapses_to_one_row_per_line(win, monkeypatch):
+    shown = [i.version for i in _python_provider(win, monkeypatch).display_versions()]
+    assert shown == ["3.16.0a2", "3.12.16", "3.11.18", "3.10.22", "3.9.25", "3.8.20"]
+
+
 def test_python_entrypoints(win, linux):
     assert PythonProvider(win).entrypoint_candidates("python") == ["python.exe", "python"]
     assert "Scripts/pip.exe" in PythonProvider(win).entrypoint_candidates("pip")
     assert PythonProvider(linux).entrypoint_candidates("python") == ["bin/python3", "bin/python"]
+
+
+def test_python_tolerates_a_malformed_index_row(win, monkeypatch):
+    index = _ndjson("{not json", _pbs_row("3.11.18", "20261110"))
+    provider = _python_provider(win, monkeypatch, index)
+    assert [i.version for i in provider.search()] == ["3.11.18"]
 
 
 # -- claude ------------------------------------------------------------------
@@ -1436,114 +1488,3 @@ def test_dbeaver_is_registered():
     )
 
 
-# -- python: versions dropped by newer releases ------------------------------
-def _pbs_asset(version, build, triple="x86_64-pc-windows-msvc"):
-    return {
-        "name": f"cpython-{version}+{build}-{triple}-install_only.tar.gz",
-        "browser_download_url": f"https://example.invalid/{version}.tar.gz",
-        "digest": "sha256:abc",
-        "size": 1,
-    }
-
-
-def _python_with_history(monkeypatch, pages, latest_versions=("3.12.16",)):
-    """A provider whose 'latest' is small and whose history is paginated."""
-    def fake_json(url, cache_key, ttl=86400, missing_ok=False):
-        if "releases/latest" in url:
-            return {
-                "published_at": "2026-11-11T00:00:00Z",
-                "assets": [_pbs_asset(v, "20261110") for v in latest_versions],
-            }
-        page = int(url.rsplit("page=", 1)[1])
-        return pages.get(page, [])
-
-    monkeypatch.setattr("envxx.http.get_json", fake_json)
-    return PythonProvider(Platform("windows", "x64"))
-
-
-def test_search_does_not_walk_history(win, monkeypatch):
-    """search must stay cheap: no history requests unless a version is asked for."""
-    pages: dict[int, list] = {}
-    seen: list[str] = []
-
-    def fake_json(url, cache_key, ttl=86400, missing_ok=False):
-        if "releases/latest" in url:
-            return {"assets": [_pbs_asset("3.12.16", "20261110")]}
-        seen.append(url)
-        return pages.get(int(url.rsplit("page=", 1)[1]), [])
-
-    monkeypatch.setattr("envxx.http.get_json", fake_json)
-    provider = PythonProvider(Platform("windows", "x64"))
-    provider.search()
-
-    assert seen == []
-
-
-def test_a_dropped_line_is_found_in_an_older_release(win, monkeypatch):
-    pages = {1: [{"assets": [_pbs_asset("3.10.14", "20241016"),
-                             _pbs_asset("3.9.20", "20241016")]}]}
-    provider = _python_with_history(monkeypatch, pages)
-
-    assert provider.resolve("3.10") == "3.10.14"
-    assert provider.resolve("3.9") == "3.9.20"
-
-
-def test_a_dropped_line_resolves_to_its_newest_build(win, monkeypatch):
-    # two releases carry 3.10; the walk stops at the first, which is newest
-    pages = {
-        1: [{"assets": [_pbs_asset("3.10.14", "20241016")]}],
-        2: [{"assets": [_pbs_asset("3.10.12", "20240415")]}],
-    }
-    provider = _python_with_history(monkeypatch, pages)
-
-    assert provider.resolve("3.10") == "3.10.14"
-
-
-def test_the_walk_stops_after_the_first_release_that_has_the_line(win, monkeypatch):
-    fetched: list[int] = []
-
-    def fake_json(url, cache_key, ttl=86400, missing_ok=False):
-        if "releases/latest" in url:
-            return {"assets": [_pbs_asset("3.12.16", "20261110")]}
-        page = int(url.rsplit("page=", 1)[1])
-        fetched.append(page)
-        if page == 1:
-            return [{"assets": [_pbs_asset("3.10.14", "20241016")]}]
-        return [{"assets": [_pbs_asset("3.9.20", "20241016")]}]
-
-    monkeypatch.setattr("envxx.http.get_json", fake_json)
-    provider = PythonProvider(Platform("windows", "x64"))
-    provider.resolve("3.10")
-
-    assert fetched == [1]
-
-
-def test_a_history_build_can_be_planned(win, monkeypatch):
-    pages = {1: [{"assets": [_pbs_asset("3.10.14", "20241016")]}]}
-    provider = _python_with_history(monkeypatch, pages)
-
-    version = provider.resolve("3.10")
-    plan = provider.plan(version)
-    assert plan.asset.filename == "cpython-3.10.14+20241016-x86_64-pc-windows-msvc-install_only.tar.gz"
-    assert plan.asset.sha256 == "abc"
-
-
-def test_an_unknown_line_still_fails(win, monkeypatch):
-    pages = {1: [{"assets": [_pbs_asset("3.9.20", "20241016")]}]}
-    provider = _python_with_history(monkeypatch, pages)
-
-    with pytest.raises(VersionNotFound):
-        provider.resolve("3.7")
-
-
-def test_an_unreachable_history_page_does_not_mask_a_real_miss(win, monkeypatch):
-    def fake_json(url, cache_key, ttl=86400, missing_ok=False):
-        if "releases/latest" in url:
-            return {"assets": [_pbs_asset("3.12.16", "20261110")]}
-        raise NetworkError("gateway timeout")
-
-    monkeypatch.setattr("envxx.http.get_json", fake_json)
-    provider = PythonProvider(Platform("windows", "x64"))
-
-    with pytest.raises(VersionNotFound):
-        provider.resolve("3.10")

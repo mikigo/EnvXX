@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import errno
 import os
+from pathlib import Path
 
 import pytest
 
@@ -532,3 +533,106 @@ def test_a_selector_before_a_script_still_runs_it(monkeypatch):
 
     assert cli.main(["python3.12", "script.py", "--flag"]) == 0
     assert calls == [("3.12.16", ["script.py", "--flag"], None)]
+
+
+# -- version -----------------------------------------------------------------
+def test_version_flag_reports_the_package_version(capsys):
+    from envxx import __version__ as package_version
+
+    assert main(["--version"]) == 0
+    printed = capsys.readouterr().out.strip()
+    assert printed == f"envxx {package_version}"
+
+
+def test_short_version_flag_is_equivalent(capsys):
+    from envxx import __version__ as package_version
+
+    assert main(["-V"]) == 0
+    assert capsys.readouterr().out.strip() == f"envxx {package_version}"
+
+
+def test_version_does_not_reach_a_tool(monkeypatch):
+    # 'envxx --version' answers for envxx; only 'envxx <tool> -v' reaches a tool
+    from envxx import cli
+
+    calls = []
+    monkeypatch.setattr(
+        cli.runner, "run",
+        lambda p, v, a, entrypoint=None: calls.append((v, a, entrypoint)) or 0,
+    )
+    assert cli.main(["--version"]) == 0
+    assert calls == []
+
+
+def test_the_version_is_declared_once():
+    """pyproject must read the version from the package, not restate it."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    text = (root / "pyproject.toml").read_text(encoding="utf-8")
+
+    assert 'dynamic = ["version"]' in text
+    assert '[tool.hatch.version]' in text
+    # a hardcoded [project] version would drift from envxx.__version__
+    assert "\nversion = " not in text.split("[tool.hatch.version]")[0]
+
+
+# -- release consistency -----------------------------------------------------
+def _git_tags(root) -> list[str]:
+    import subprocess
+
+    result = subprocess.run(
+        ["git", "tag", "--list", "v*"],
+        cwd=root, capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        pytest.skip("not a git checkout")
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def test_the_version_is_not_behind_the_newest_tag():
+    """__version__ may lead the newest tag by a bump, never trail it.
+
+    Between "bump the version" and "create the tag" the two differ on
+    purpose, so an equality check would fail during that window. What must
+    never happen is the reverse: a tag released for 1.6.0 while the code
+    still says 1.5.0, which is what CI rejects and what this catches early.
+    """
+    from envxx import __version__
+
+    root = Path(__file__).resolve().parent.parent
+    tags = _git_tags(root)
+    if not tags:
+        pytest.skip("no release tags yet")
+
+    from envxx.versions import version_key
+
+    newest = max(tags, key=lambda t: version_key(t.lstrip("v")))
+    assert version_key(__version__) >= version_key(newest.lstrip("v")), (
+        f"newest tag is {newest} but __version__ is {__version__}; "
+        f"the code is behind a published release"
+    )
+
+
+def test_release_script_exists_and_is_executable():
+    """scripts/release.sh derives the tag from __version__, removing the copy."""
+    import os
+
+    root = Path(__file__).resolve().parent.parent
+    script = root / "scripts" / "release.sh"
+
+    assert script.is_file()
+    if os.name != "nt":
+        assert os.access(script, os.X_OK)
+
+
+def test_the_workflow_checks_the_tag_against_the_version():
+    """A forgotten bump must fail CI before anything is published."""
+    root = Path(__file__).resolve().parent.parent
+    workflow = (root / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "envxx.__version__" in workflow
+    # the check has to run on tag pushes only; a manual run has no tag to compare
+    assert "startsWith(github.ref, 'refs/tags/')" in workflow

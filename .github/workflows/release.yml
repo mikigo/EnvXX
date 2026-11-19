@@ -22,6 +22,22 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e ".[dev]"
+
+      # A tag is what names the release assets, and __version__ is what the
+      # binary reports. They are two separate edits, so a forgotten bump
+      # ships a 1.6.0 zip that answers 'envxx 1.5.0'. Fail before building.
+      - name: version matches the tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          code=$(python -c "import envxx; print(envxx.__version__)")
+          if [ "$tag" != "$code" ]; then
+            echo "::error::tag says $tag but envxx.__version__ is $code"
+            echo "bump envxx/__init__.py, or retag"
+            exit 1
+          fi
+          echo "tag and __version__ agree on $tag"
+
       - run: python -m pytest -q
 
   build:

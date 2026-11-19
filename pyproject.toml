@@ -4,7 +4,9 @@ build-backend = "hatchling.build"
 
 [project]
 name = "envxx"
-version = "1.5.0"
+# single source of truth: envxx.__version__, so a frozen binary reports the
+# same number as the package metadata without a build step rewriting anything
+dynamic = ["version"]
 description = "Portable multi-runtime manager for Python, Node.js and friends"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -22,6 +24,9 @@ envxx = "envxx.cli:main"
 dev = [
     "pytest>=8.0",
 ]
+
+[tool.hatch.version]
+path = "envxx/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["envxx"]

@@ -62,7 +62,7 @@ JDK 只列 17 以上的 LTS 线加上最新的特性版本，Adoptium 还在发�
 
 版本多的运行时（Go、JDK、uv、Bun、Node）默认每个版本线只显示最新一个补丁版，比如 Go 显示 `1.27.4` 而不是 1.27 线的全部；`search --all` 才是完整列表。
 
-Python 有个额外情况：python-build-standalone 每次发版只打包还在维护的版本线，所以最新 release 里没有 3.8/3.9/3.10。这些版本的最后一个构建留在更早的 release 里。`search` 只读最新 release（快），但当你明确要一个列表里没有的版本时（`envxx python3.10 ...` 或 `envxx python install 3.10`），EnvXX 会往回翻 release 历史，找到就停。翻页比较慢（每页几 MB），所以只在真的要装旧版时才发生。
+Python 走的是 Astral 的官方索引（`releases.astral.sh` 的 NDJSON，uv 用的也是这个），一次请求拿到全部 500 多个构建，从 3.8 到 3.16 都在内。这比翻 GitHub release 靠谱：python-build-standalone 的最新 release 只打包还在维护的版本线，3.8/3.9/3.10 早就不在里面了，用 GitHub API 找它们得翻很多页而且不一定翻得到。索引 20MB，缓存一天，第一次用会慢一些。索引里每个构建都带 sha256，下载会校验。
 
 加新工具不用动命令行解析。写一个 provider，登记进注册表就行。ripgrep、fd、fzf 这些单文件工具都在候选名单里，只是我还没用到。
 
@@ -212,3 +212,18 @@ Claude Code 走的是 Open VSX，不是 VSCode 官方插件市场。两边是同
 GitHub 未登录限流每小时 60 次。设个 `GITHUB_TOKEN` 能提到 5000，反正不要钱。
 
 大文件支持断点续传，断了重跑就行，已经下过的部分不会丢。安装中断留下的残缺目录，下次 `install` 会检测到并自动重装。
+
+## 发布
+
+版本号只在 `envxx/__init__.py` 里写一次。`envxx --version` 读它，`pyproject.toml` 用 `dynamic = ["version"]` 从它读，打包出来的 zip 名用 tag。
+
+tag 是同一个数字的第二份拷贝，两份会漂移：改了代码忘了改 tag，或者反过来。两道保险：
+
+```bash
+scripts/release.sh --dry-run   # 读 __version__，告诉你将要打的 tag
+scripts/release.sh --push      # 打 tag 并推送，交给 CI
+```
+
+脚本要求工作区干净、tag 不重复，版本号直接从代码里读，不用手敲。
+
+CI 在 tag 触发时会比对 tag 和 `__version__`，不一致直接失败，不会把版本号对不上的包发出去。手动触发（`workflow_dispatch`）没有 tag 可比，跳过这项检查。

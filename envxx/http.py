@@ -113,7 +113,8 @@ def _request_json(url: str, missing_ok: bool = False) -> Any:
             raise NetworkError(
                 f"GitHub API rate limit reached for {url}"
                 f"{_rate_limit_hint(response)}"
-                f" (set GITHUB_TOKEN for 5000 requests/hour)"
+                f" (set GITHUB_TOKEN for 5000 requests/hour; "
+                f"installed versions keep working offline, see 'envxx <tool> list')"
             )
         try:
             response.raise_for_status()

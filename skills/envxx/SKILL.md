@@ -105,7 +105,7 @@ envxx python3.11 black .
 
 `notepad--` 的 arm64 包只有部分版本附带，arm64 机器上能列的版本比 x64 少得多。`marktext` 的 v0.24 线还在 rc 阶段，会被过滤掉。
 
-Python 的旧版本（3.8/3.9/3.10）不在 `search` 里，因为 python-build-standalone 的最新 release 只打包还在维护的版本线。直接写 `envxx python3.10 ...` 会往回翻 release 历史找最后一个构建，能找到就直接装。不用先劝用户"升级到 3.11"——他要 3.10 就给 3.10。翻页较慢（每页几 MB），所以别为了试探而反复查询。
+Python 的版本目录来自 Astral 的官方索引，覆盖 3.8 到 3.16 的全部构建，所以 `envxx python3.8 ...` 这类老版本也能直接装。索引 20MB、缓存一天，第一次查询会慢一些。
 
 ### 只下载安装包的工具
 

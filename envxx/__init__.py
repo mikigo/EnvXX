@@ -1,3 +1,5 @@
 """EnvXX - portable multi-runtime manager."""
 
-__version__ = "0.1.0"
+# Kept here rather than in pyproject so a PyInstaller build reports the same
+# number as the installed package: the frozen binary has no metadata to read.
+__version__ = "1.6.0"
