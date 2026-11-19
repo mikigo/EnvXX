@@ -614,16 +614,29 @@ def test_the_version_is_not_behind_the_newest_tag():
     )
 
 
-def test_release_script_exists_and_is_executable():
-    """scripts/release.sh derives the tag from __version__, removing the copy."""
-    import os
+def test_release_script_is_committed_executable():
+    """scripts/release.sh derives the tag from __version__, removing the copy.
+
+    The mode recorded in git is what matters: Windows cannot set the bit on
+    disk, so checking os.access here would skip the assertion exactly where
+    the file is written, and only CI would notice the script is not runnable.
+    """
+    import subprocess
 
     root = Path(__file__).resolve().parent.parent
-    script = root / "scripts" / "release.sh"
+    assert (root / "scripts" / "release.sh").is_file()
 
-    assert script.is_file()
-    if os.name != "nt":
-        assert os.access(script, os.X_OK)
+    result = subprocess.run(
+        ["git", "ls-files", "-s", "scripts/release.sh"],
+        cwd=root, capture_output=True, text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        pytest.skip("not a git checkout")
+    mode = result.stdout.split()[0]
+    assert mode == "100755", (
+        f"release.sh is committed as {mode}, not 100755; "
+        f"run 'git update-index --chmod=+x scripts/release.sh'"
+    )
 
 
 def test_the_workflow_checks_the_tag_against_the_version():
