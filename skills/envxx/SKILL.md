@@ -3,8 +3,8 @@ name: envxx
 description: |
   使用 EnvXX 管理免安装的 Python、Node.js、Go、JDK、uv、Bun 运行时，以及在 EnvXX 仓库里新增一个工具 provider。
   当用户需要运行某个版本的 Python/Node/Go/Java、抱怨机器上没有装某种运行时、想把工具下载到本地目录而不是全局安装、
-  或者问"这个项目怎么加一个新工具"时使用。也适用于用户提到 envxx 命令、~/.envxx 目录、portable/免安装运行时、
-  绿色版工具、多版本并存、或希望删掉一个目录就等于卸载的场景。
+  需要给项目单独准备一套运行时、或者问"这个项目怎么加一个新工具"时使用。也适用于用户提到 envxx 命令、~/.envxx 目录、
+  项目级 .envxx、portable/免安装运行时、绿色版工具、多版本并存、或希望删掉一个目录就等于卸载的场景。
 allowed-tools:
   - Read
   - Write
@@ -16,7 +16,7 @@ allowed-tools:
 
 # EnvXX
 
-EnvXX 把一个工具的**官方免安装版**下载到 `~/.envxx`，按需调用。它不管依赖，不编译源码，不维护 lockfile：只负责"这个工具本身装在哪"。删掉 `~/.envxx` 就等于卸载。
+EnvXX 把一个工具的**官方免安装版**下载到一个 store 目录，按需调用。它不管依赖，不编译源码，不维护 lockfile：只负责"这个工具本身装在哪"。删掉 store 就等于卸载。
 
 两件事：**用它**，或者**给它加工具**。
 
@@ -25,7 +25,7 @@ EnvXX 把一个工具的**官方免安装版**下载到 `~/.envxx`，按需调�
 - 要跑 python/node/go/java、机器上没有、或者要指定版本 → 看「使用」。
 - 要在 EnvXX 仓库里支持一个新工具、或者改一个已有 provider → 看「扩展」，细读 `references/adding-a-provider.md`。
 
-不确定就看仓库里有没有 `envxx/` 包：有就是后者。
+不确定就看仓库里有没有 `envxx/providers/`：有就是后者。
 
 ## 使用
 
@@ -54,6 +54,16 @@ envxx <tool> uninstall 3.11.18 # 应用类可简写 rm
 
 列表一律**新版本在前**。`search` 对版本多的工具每行只显示最新补丁（Go 显示 `1.27.4` 而不是 1.27 线的全部）。
 
+版本号也可以直接跟在选择器后面，管理命令放在其后：
+
+```bash
+envxx python3.12 install       # 等同 envxx python install 3.12
+envxx python3.12 where         # 等同 envxx python where 3.12
+envxx python3.12 list          # 版本无意义，等同 envxx python list
+```
+
+`list` 和 `search` 覆盖所有版本，所以选择器里的版本会被丢掉。
+
 ### 换入口
 
 同一个工具的不同入口直接写名字：
@@ -73,45 +83,60 @@ envxx run python@3.11:pip --version
 envxx run node@22:npm --version
 ```
 
-### 装进运行时的命令也能叫
+**默认入口不要重复写。** JDK 的默认入口是 `java`，`envxx jdk21 --version` 对，`envxx jdk21 java --version` 会把 `java` 当参数传给 java 自己，报 `ClassNotFoundException`。同理 `envxx node22 node -v` 不成立。只有非默认入口（`pip`、`npm`、`javac`、`gofmt`、`uvx`）才需要显式写。
 
-`pip install` 装到 Python 里的控制台脚本，可以直接按名字跑：
+### 装进运行时的命令
+
+`pip install` 装到某个 Python 里的控制台脚本，可以按名字跑：
 
 ```bash
-envxx python3.11 pip install -e .
-envxx python3.11 envxx --help     # 找到 Scripts/envxx.exe
+envxx python3.11 pip install black
+envxx python3.11 black .
 ```
 
-找不到的名字不会被吞掉，仍然按普通参数交给默认入口，所以 `envxx python3.11 script.py` 行为不变。
+前提是脚本确实在 `Scripts/`（Unix 的 `bin/`）里。名字没找到不会报错，而是按普通参数交给默认入口，所以 `envxx python3.11 script.py` 行为不变。副作用：如果当前目录恰好有个同名文件或包，Python 会按自己的规则处理它（例如 `envxx python3.11 envxx` 会去找 `./envxx/`）。
 
 ### 支持的工具
 
 运行时（可多版本并存）：`python`、`node`、`go`、`jdk`、`uv`、`bun`
 应用（留最新即可）：`claude`、`opencode`、`cc-switch`、`xterm`、`dufs`
 
+### Store 位置
+
+优先级：`ENVXX_HOME` → 从 cwd 向上找到的项目级 `.envxx` → `~/.envxx`。
+
+项目级由 `envxx init` 创建，含 `tools/ downloads/ cache/ .locks/` 和一个 `.project` 标记文件，并自动写进 `.gitignore`。向上查找只认带标记的目录，家目录本身不算项目级。
+
+写命令时注意：在带 `.envxx` 的仓库里执行 `envxx`，装的东西进项目目录，不是全局。用户如果问"为什么没装到 ~/.envxx"，先看有没有项目级 store。
+
 ## 扩展：加一个工具
 
-新增工具是填空：写一个 provider，登记进注册表，然后对着**真实的包结构**验证。`references/adding-a-provider.md` 有完整的字段说明、平台映射表、checksum 策略和测试写法。开工前至少读一遍那两个 provider 模板之一。
+新增工具是填空：写一个 provider，登记进注册表，然后对着**真实的包结构**验证。`references/adding-a-provider.md` 有字段说明、平台映射、checksum 策略、测试写法和验证手法。
 
 最短路径：
 
-1. 读 `envxx/providers/uv_provider.py`（结构最简单，Archive 二进制在根目录）和 `envxx/providers/go_provider.py`（清单自带 sha256）当模板。
-2. 在 `envxx/providers/` 新建 `<tool>_provider.py`，定义 `ToolSpec` 和 `Provider` 子类。
-3. 在 `envxx/providers/__init__.py` 的 `_PROVIDER_TYPES` 里登记，补 `__all__`。
-4. 在 `tests/test_runtimes.py` 或 `tests/test_providers.py` 里加用例，用假的 JSON payload，不联网。
-5. 跑 `python -m pytest -q` 和一次真实安装。
+1. 读 `envxx/providers/uv_provider.py`（最简单：GitHub release，二进制在包根）和 `envxx/providers/go_provider.py`（清单自带 sha256）当模板。
+2. 新建 `envxx/providers/<tool>_provider.py`，定义 `ToolSpec` 和 `Provider` 子类。
+3. 在 `envxx/providers/__init__.py` 的 `_PROVIDER_TYPES` 登记，补 `__all__`。
+4. 在 `tests/test_runtimes.py` 或 `tests/test_providers.py` 加用例，用假 payload，不联网。
+5. 跑 `python -m pytest -q`，再做一次真实安装。
 
-### 三条必须遵守的约定
+### 三条约定
 
-**排序只在基类发生。** `_fetch_versions()` 返回什么顺序都行，`Provider.search()` 会统一排成新版本在前。不要在 provider 里再 `sort`。`display_versions()` 只在需要折叠时覆写，用 `latest_per_line(self.search(), depth=N)`。
+**排序只在基类发生。** `_fetch_versions()` 返回什么顺序都行，`Provider.search()` 统一排成新版本在前。不要在 provider 里 `sort`。需要折叠时才覆写 `display_versions()`，用 `latest_per_line(self.search(), depth=N)`。
 
-**先解包看一眼再写路径。** 顶层有没有目录决定 `strip_top`；二进制在 `bin/`、根目录、还是 `Contents/Home/bin/`（macOS 的 JDK）决定 `entrypoints`。这些猜不出来。大包用 Range 请求读末尾的 zip 中央目录，或读 tarball 的头几兆，不要下 200MB 去确认。
+**先解包看一眼再写路径。** 顶层有没有目录决定 `strip_top`；二进制在 `bin/`、包根、还是 `Contents/Home/bin/`（macOS 的 JDK）决定 `entrypoints`。猜不出来。大包用 Range 读 zip 末尾的中央目录，或读 tarball 头几兆，不要下 200MB 确认。
 
-**校验要么来自 API，要么指向校验文件。** `checksum="api_digest"` 表示 payload 里自带 digest；`"shasums_file"` 表示有 `<hex>  <name>` 列表；`"sha256_file"` 是单行 hex。拿不到就别假装有，写 `"none"`。
+**校验要么来自 API，要么指向校验文件。** `api_digest` 是 payload 自带 digest，`shasums_file` 是 `<hex>  <name>` 列表，`sha256_file` 是单行 hex。拿不到就写 `none`，别假装有。
 
-## 常见坑（都是实际撞过的）
+## 常见坑
 
+全是实际撞过的，按遇到概率排：
+
+- **同名参数被当成脚本。** `envxx python3.12 install` 曾经在装完之后让 Python 去找名为 `install` 的文件。管理命令名要认得出来，见 `MANAGE_COMMANDS`。
+- **默认入口重复写。** `envxx jdk21 java -version` 必然失败，见「换入口」。
 - **macOS 的 JDK 是 bundle**：`Contents/Home/bin/java`，Windows/Linux 是 `bin/java`。
+- **包的顶层目录不能猜。** Go 的顶层叫 `go`，bun 的叫 `bun-windows-x64`，ripgrep 12 之前还是平铺的。
 - **Adoptium 版本字段不一致**：`openjdk_version` 可能四段也可能 `27+35`，用 `semver` 再剥 `+`。
 - **独立版 Bun 没有 `bunx`**：只有 `bun.exe`，`bunx` 是 npm 安装时创建的。
 - **Git Bash 的 `test -f foo` 对 `foo.exe` 也返回真**，`basename` 会丢扩展名。
@@ -119,18 +144,20 @@ envxx python3.11 envxx --help     # 找到 Scripts/envxx.exe
 
 ## 排障
 
-报错信息能直接定位到环节，按这个顺序看：
+按报错定位环节：
 
-**`has no <name> at <path>`**：安装成功但找不到入口。先看报错里给出的 path，和实际目录对比（`envxx <tool> list` 能拿到路径，或直接 `ls ~/.envxx/tools/<tool>/<version>/`）。绝大多数是路径写错了：顶层目录名不是你以为的那个，或者 macOS 的 bundle 多两层 `Contents/Home`。这时改 `entrypoint_candidates()`，不要去改安装逻辑。
+**`has no <name> at <path>`**：安装成功但找不到入口。对比报错里的 path 和实际目录（`envxx <tool> list` 给路径，或直接 ls）。多数是路径写错：顶层目录名不对，或 macOS bundle 多两层。改 `entrypoint_candidates()`，不要改安装逻辑。
 
-**`not available for <platform>`**：远端目录里没有当前平台的构建。可能是筛选条件太窄（比如只匹配 `unknown-linux-gnu`，而项目只发了 `musl`），也可能是平台映射表写错了。先 `envxx <tool> search --all` 看有没有版本，再看资产名。
+**`can't open file` / `MODULE_NOT_FOUND` / `ClassNotFoundException`**：参数被当成脚本或模块名了。见「默认入口不要重复写」和「同名参数被当成脚本」。注意这类错误发生在**安装成功之后**，安装日志末尾已经打印过 `installed ...`，所以不是安装失败。
 
-**`checksum mismatch`**：下载到的东西和声明的 digest 不一致。检查是不是选了 `installer` 而不是 `archive`（Go 的清单里两种都有），或者镜像返回了错误页面。
+**`not available for <platform>`**：远端没有当前平台的构建。筛选条件太窄（只匹配 `unknown-linux-gnu` 而项目只发 `musl`），或平台映射写错。先 `search --all` 看版本，再看资产名。
 
-**`GitHub API rate limit`**：等配额恢复，或者设 `GITHUB_TOKEN`。目录分页拉取时尤其容易撞上。
+**`checksum mismatch`**：下载内容和 digest 不符。检查是不是选了 `installer` 而不是 `archive`（Go 清单两种都有），或镜像返回了错误页。
+
+**`GitHub API rate limit`**：等配额，或设 `GITHUB_TOKEN`。分页拉目录时最容易撞上。
 
 ## 环境
 
-- 所有内容在 `~/.envxx`，可用 `ENVXX_HOME` 改。
+- Store 默认 `~/.envxx`，优先级见上。
 - 镜像变量：`ENVXX_GITHUB_MIRROR`、`ENVXX_GITHUB_API`、`ENVXX_GITHUB_RAW`、`ENVXX_NODE_DIST`、`ENVXX_CCSWITCH_MIRROR`。Go 走 `dl.google.com`，JDK 走 Adoptium API，不在镜像范围内。
 - GitHub 未登录限流 60 次/小时，设 `GITHUB_TOKEN` 提到 5000。

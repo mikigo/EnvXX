@@ -202,6 +202,17 @@ def _dir_size(path: Path) -> int:
 # ---------------------------------------------------------------------------
 # per-tool subcommands
 # ---------------------------------------------------------------------------
+# Names that manage the store rather than run the tool. A selector in front of
+# one of them ('python3.12 install') used to fall through to execution, so the
+# word became a script path and python died looking for a file called install.
+MANAGE_COMMANDS = ("search", "list", "install", "uninstall", "update", "where", "rm")
+
+# Of those, the ones that take a version argument. 'list' and 'search' scope
+# over every installed or published version, so a selector in front of them
+# carries no meaning and is simply dropped.
+VERSIONED_COMMANDS = ("install", "uninstall", "where", "rm")
+
+
 def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
     @group.command("search")
     def search(all_versions: bool = typer.Option(False, "--all", help="show every version")) -> None:
@@ -326,7 +337,9 @@ def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
         )
         if not resolved:
             raise UsageError(f"{spec.name} {version or ''} is not installed".strip())
-        out.print(runner.which(provider, resolved))
+        # a path is meant to be copied into an editor or a script, so no rich
+        # wrapping: at 80 columns it would break the path across two lines
+        typer.echo(runner.which(provider, resolved))
 
 
 for _spec in tool_specs():
@@ -448,9 +461,27 @@ def main(argv: list[str] | None = None) -> int:
                 and rest[0] not in ("-h", "--help")
             )
             bare_app_run = spec is not None and spec.kind == "app" and not rest
+
+            # 'python3.12 install' spells a command and a version in one word.
+            # Treat it as 'python install 3.12' rather than as Python being
+            # asked to run a script named install. Commands that scope over
+            # everything ('list', 'search') only need the version dropped.
+            selector = _match_selector(token)
+            manage = (
+                selector is not None
+                and bool(rest)
+                and rest[0] in MANAGE_COMMANDS
+            )
+            if manage:
+                spec, query = selector
+                if rest[0] in VERSIONED_COMMANDS:
+                    argv = [spec.name, rest[0], query, *rest[1:]]
+                else:
+                    argv = [spec.name, *rest]
+
             should_run = (
                 token == "run"
-                or _match_selector(token) is not None
+                or (selector is not None and not manage)
                 or flag_run
                 or bare_app_run
             )

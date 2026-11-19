@@ -46,7 +46,9 @@ ToolSpec(
 - `module="pip"` 表示没有启动器文件时退化成 `<默认入口> -m pip`。
 - `relpath` 里可以写 `{version}`，会在知道具体版本后替换（MobaXterm 那种把版本写进文件名的）。
 
-`script_dirs`：`pip install -e .` 会往 Python 的 `Scripts/` 或 `bin/` 写控制台脚本，用户期望 `envxx python3.11 envxx` 能找到它。把这个目录填进来，`Provider.script_path()` 会按名字查。只有会被人往里装东西的运行时（python）需要。
+`script_dirs`：`pip install -e .` 会往 Python 的 `Scripts/` 或 `bin/` 写控制台脚本，用户期望 `envxx python3.11 <脚本名>` 能找到它。把这个目录填进来，`Provider.script_path()` 会按名字查。只有会被人往里装东西的运行时（python）需要。
+
+注意 `script_path()` 只回答"这个名字在不在"，不管它能不能跑。脚本自己在导入时会去找依赖，所以 `envxx python3.11 envxx` 只有在那个 Python 里装过 envxx 的依赖时才成立，否则报 `ModuleNotFoundError`。这不是 provider 该处理的事，文档里别把它写成无条件可用。
 
 ## Provider 子类的最小实现
 
@@ -167,50 +169,63 @@ _PROVIDER_TYPES: dict[str, type[Provider]] = {
 
 ## 测试
 
-放 `tests/test_runtimes.py`（新结构化运行时）或 `tests/test_providers.py`（其余）。单测不能联网 —— `tests/conftest.py` 里有个 autouse fixture，任何没打 `@pytest.mark.network` 的测试碰网络都会失败。用假的 payload：
+放 `tests/test_runtimes.py`（新结构化运行时）或 `tests/test_providers.py`（其余）。单测不能联网——`tests/conftest.py` 里有个 autouse fixture，任何没打 `@pytest.mark.network` 的测试碰网络都会失败。用假的 payload：
 
 ```python
 def test_foo_lists_versions(win, monkeypatch):
     tags = [{"name": "v1.2.3"}, {"name": "v1.2.2"}, {"name": "nightly"}]
     monkeypatch.setattr(
         "envxx.http.get_json",
-        lambda url, *a, **k: tags if "page=1" in url else [],
+        lambda url, *a, **k: tags if url.endswith("page=1") else [],
     )
     versions = [i.version for i in FooProvider(win).search()]
     assert versions == ["1.2.3", "1.2.2"]   # 新版本在前，垃圾 tag 被过滤
 ```
+
+**分页的桩用 `endswith("page=1")`，不要用 `"page=1" in url`。** 后者会匹配到 `per_page=100`，第一页满 100 条时永远翻不完，测试挂死在循环里。这个坑是实际踩到的。
 
 值得覆盖的点：
 
 - 版本归一化（前缀、元数据、prerelease 标记）
 - 六平台资产名（参数化 `Platform(os, arch)`）
 - `strip_top` 和入口路径
-- checksum 的三种来源
+- checksum 的各来源
 - 畸形 payload（缺字段、类型不对）要报 `NetworkError` 而不是 `KeyError`
 
-跑 `python -m pytest -q`。全绿之后再做一次真实安装：
+全绿之后再做一次真实安装：
 
 ```bash
 envxx <tool> install <version>    # 下载、解包、校验入口
 envxx <tool> where                # 确认路径
-envxx <tool0.x> --version         # 真的能跑
+envxx <tool>0.x --version         # 选择器形式，真的能跑
 ```
 
 单测证明解析逻辑对，真实安装才能证明包结构和你想的一样。
+
+## 在写代码之前验证来源
+
+三条经验，都是评估里花了半小时才弄明白的：
+
+**先看 tags 是不是只有版本号。** ripgrep 的 tag 空间混着 `ignore-0.4.34`、`termcolor-0.3.6` 这类 crate tag，第一页 100 条里一个版本都没有。这种情况要走 `/releases` 接口，它同时带资产名、size 和 `digest`，代价是每页大几 MB。判断方法：拉一页 tags，数一下能匹配版本正则的比例。
+
+**早期版本可能不符合现在的规律。** ripgrep 11.x 的 Windows zip 是平铺的，12.0.0 之后才有外层目录；投到 `strip_top` 上就是「11.x 解出一个空目录」。如果工具历史很长，要么在 provider 里按版本分支，要么在 spec 里声明一个最低支持版本。
+
+**校验文件的格式不止一种。** ripgrep 的 `.sha256` 是 Windows CertUtil 的输出（`SHA256 hash of ...:` + 单独一行的 hex + 尾巴），现有的 `shasums_file` 和 `sha256_file` 都解析不了。遇到这种情况优先改用 `api_digest`（release payload 里自带），没有就写 `none`，不要为它改 `http.py` 的解析器——除非你确定以后还有别的工具也用这个格式。
 
 ## 验证包结构不必下载整个包
 
 大包（JDK 有 205MB）不用下完：
 
 - **zip**：用 Range 请求读最后几百 KB，解析中央目录里的文件名。
-- **tar.gz**：读头几兆解压，tarfile 设 `errorlevel=0` 容错，能扫出前面几百个成员名。
+- **tar.gz**：读头几兆解压，`tarfile.open(..., errorlevel=0)` 容错，能扫出前面几百个成员名。
 
-两条都能确认顶层的目录名、二进制位置和是否带 Unix 权限位。
+两条都能确认顶层目录名、二进制位置和是否带 Unix 权限位。写成一个临时脚本跑一次就行，不用提交。
 
 ## 已知要避开的坑
 
 - macOS 的 JDK 是 `Contents/Home/bin/java`，不是 `bin/java`。
 - Adoptium 的 `openjdk_version` 四段和三段混用，用 `semver`。
 - 独立版 Bun 只有 `bun.exe`，没有 `bunx`。
-- 顶层目录名经常山寨：Go 的包顶层就叫 `go`，bun 的叫 `bun-windows-x64`，不能靠猜。
-- GitHub API 未登录 60 次/小时。目录分页拉取时一页 100 条，别一页一页翻到底还拿到 403。
+- 顶层目录名经常山寨：Go 的包顶层就叫 `go`，bun 的叫 `bun-windows-x64`。
+- GitHub API 未登录 60 次/小时，分页拉取时别翻到底才发现 403。
+- `per_page=100` 的 URL 里包含 `page=1` 子串，测试桩别用 `in`。

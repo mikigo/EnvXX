@@ -485,3 +485,50 @@ def test_missing_console_script_names_the_fix(tmp_path, monkeypatch):
     with pytest.raises(Exception) as caught:
         resolve_command(provider, version, "nosuch")
     assert "pip install nosuch" in str(caught.value)
+
+
+# -- selector in front of a management command -------------------------------
+@pytest.mark.parametrize(
+    "argv,expected",
+    [
+        # the reported bug: install succeeded, then python was asked to run a
+        # script called 'install'
+        (["python3.12", "install"], ["python", "install", "3.12"]),
+        (["python3.12", "install", "--force"], ["python", "install", "3.12", "--force"]),
+        (["python3.12", "uninstall", "-y"], ["python", "uninstall", "3.12", "-y"]),
+        (["python3.12", "where"], ["python", "where", "3.12"]),
+        # list and search scope over everything, so the version means nothing
+        (["python3.12", "list"], ["python", "list"]),
+        (["python3.12", "search", "--all"], ["python", "search", "--all"]),
+        (["node22", "update"], ["node", "update"]),
+    ],
+)
+def test_a_selector_before_a_command_manages_instead_of_running(
+    monkeypatch, argv, expected
+):
+    from envxx import cli
+
+    seen = {}
+
+    def fake_app(args, standalone_mode=True):
+        seen["argv"] = list(args)
+
+    monkeypatch.setattr(cli, "app", fake_app)
+    assert cli.main(argv) == 0
+    assert seen["argv"] == expected
+
+
+def test_a_selector_before_a_script_still_runs_it(monkeypatch):
+    from envxx import cli
+
+    calls = []
+    monkeypatch.setattr(
+        cli.runner, "run",
+        lambda p, v, a, entrypoint=None: calls.append((v, a, entrypoint)) or 0,
+    )
+    monkeypatch.setattr(
+        "envxx.cli._ensure_installed", lambda provider, query: "3.12.16"
+    )
+
+    assert cli.main(["python3.12", "script.py", "--flag"]) == 0
+    assert calls == [("3.12.16", ["script.py", "--flag"], None)]

@@ -63,6 +63,14 @@ envxx <tool> where             # 打印入口的绝对路径
 envxx <tool> uninstall 3.11.18 # 删除某个版本（应用类可简写 rm）
 ```
 
+版本号可以直接跟在工具名后面，管理命令跟在后面也行：
+
+```bash
+envxx python3.12 install       # 等同 envxx python install 3.12
+envxx python3.12 where         # 等同 envxx python where 3.12
+envxx python3.12 list          # 版本无意义，等同 envxx python list
+```
+
 `search` 默认只列近期版本：应用的列表取最新 10 条，多出来的会提示用 `--all`。所有列表（`search`、`search --all`、`list`）都是新版本在前。`--all` 到底有多全取决于工具——opencode 会去翻完整的 tag 历史，其余几个本来就是全量。
 
 `envxx python3.11` 这种写法，本地没有 3.11 时会自动拉最新补丁版再执行，不用先 install。
@@ -79,17 +87,16 @@ envxx go1.27 gofmt -l .
 envxx uv0.13 uvx ruff check .
 ```
 
-用 pip 往这个 Python 里装的东西，也能按名字直接跑。它会去 `Scripts/`（Unix 上是 `bin/`）里找同名脚本：
+JDK 的默认入口就是 `java`，直接跟参数即可，不要重复写入口名：
 
 ```bash
-envxx python3.11 pip install -e .
-envxx python3.11 envxx --help
-envxx python3.11 black .
+envxx jdk21 --version          # 对
+envxx jdk21 javac -version     # 需要另一个入口时才写
 ```
 
-## 几个说明
+## 存储位置
 
-所有东西默认都在 `~/.envxx`：
+所有东西默认在 `~/.envxx`：
 
 ```
 ~/.envxx/
@@ -101,7 +108,7 @@ envxx python3.11 black .
 
 `ENVXX_HOME` 可以改位置。
 
-## 每个项目一套
+### 每个项目一套
 
 项目里需要固定版本的运行时，又不希望污染全局的话：
 
@@ -119,6 +126,19 @@ envxx init
 向上查找只认带 `.project` 标记文件的目录，所以一个碰巧叫 `.envxx` 的目录不会被误当成 store。`envxx init` 发现已有目录但不是它建的，会报错退出，不会覆盖。
 
 `tools/` 里放的是可执行文件。`init` 自动写 `.gitignore` 是为了挡住误提交，但挡不住一个本来就带着工具二进制的仓库——clone 别人的项目后就地跑 `envxx` 之前，先看一眼 `.envxx/` 里有什么。
+
+## 用 pip 装进去的东西
+
+`pip install` 装到某个 Python 里的控制台脚本，可以按名字直接跑。前提是它确实在那个 Python 的 `Scripts/`（Unix 上是 `bin/`）里：
+
+```bash
+envxx python3.11 pip install black
+envxx python3.11 black .        # 找到 Scripts/black.exe
+```
+
+名字找不到时不会被吞掉，仍然按普通参数交给默认入口，所以 `envxx python3.11 script.py` 行为不变。这也意味着如果你在当前目录有个和参数同名的可执行文件或包，Python 会按自己的规则处理它。
+
+## 几个工具的细节
 
 国内网络慢的话留了镜像变量：
 
@@ -140,4 +160,4 @@ Claude Code 走的是 Open VSX，不是 VSCode 官方插件市场。两边是同
 
 GitHub 未登录限流每小时 60 次。设个 `GITHUB_TOKEN` 能提到 5000，反正不要钱。
 
-大文件支持断点续传，断了重跑就行，已经下过的部分不会丢。
+大文件支持断点续传，断了重跑就行，已经下过的部分不会丢。安装中断留下的残缺目录，下次 `install` 会检测到并自动重装。
