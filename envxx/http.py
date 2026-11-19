@@ -69,11 +69,15 @@ def client() -> httpx.Client:
     )
 
 
-def _get(client_: httpx.Client, url: str, **kwargs: Any) -> httpx.Response:
+def _get(
+    client_: httpx.Client, url: str, method: str = "GET", **kwargs: Any
+) -> httpx.Response:
     last: Exception | None = None
     for attempt in range(_RETRIES):
         try:
-            response = client_.get(url, headers=_auth_headers(url), **kwargs)
+            response = client_.request(
+                method, url, headers=_auth_headers(url), **kwargs
+            )
             if response.status_code >= 500:
                 raise httpx.HTTPStatusError(
                     f"server error {response.status_code}",
@@ -159,6 +163,20 @@ def get_text(url: str, cache_key: str | None = None, ttl: int = DEFAULT_TTL) -> 
         tmp.write_text(text, encoding="utf-8")
         tmp.replace(cached)
     return text
+
+
+def redirect_target(url: str) -> str:
+    """Follow redirects with a HEAD and return the final URL.
+
+    Some publishers expose only a stable entry point and put the version in
+    the file the redirect lands on. A HEAD keeps 800 MB of installer off the
+    wire just to read a version number.
+    """
+    with client() as http:
+        response = _get(http, apply_mirror(url), method="HEAD")
+        if response.status_code >= 400:
+            raise NetworkError(f"HTTP {response.status_code} from {url}")
+        return str(response.url)
 
 
 def sha256_file(path: Path) -> str:

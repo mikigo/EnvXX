@@ -40,7 +40,20 @@ envxx claude
 | opencode | `opencode` | `opencode` | GitHub Release 压缩包 |
 | CC Switch | `cc-switch` | `cc-switch` | GitHub Release 便携版 |
 | MobaXterm | `xterm` | `xterm` | mobatek.net 便携版 |
+| Windows Terminal | `wt` | `wt`、`WindowsTerminal` | GitHub Release 便携版 |
+| Notepad-- | `notepad--`、`ndd` | `notepad--` | GitHub Release 便携版 |
+| MarkText | `marktext`、`mt` | `marktext` | GitHub Release 便携版 |
+| DBeaver | `dbeaver` | `dbeaver` | GitHub Release 便携版 |
 | dufs | `dufs` | `dufs` | GitHub Release 压缩包 |
+
+另外几个只下载安装包、不代你安装的：
+
+| 工具 | 版本写法 | 来源 |
+| --- | --- | --- |
+| VS Code | `vscode`、`code` | update.code.visualstudio.com |
+| 7-Zip | `7zip`、`7z` | 7-zip.org |
+| 微信 | `wechat`、`weixin` | pc.weixin.qq.com |
+| 企业微信 | `wecom`、`wechatwork` | work.weixin.qq.com |
 
 Python、Node、Go、JDK、uv、Bun 属于运行时，多个版本可以并存：`python3.11` 和 `python3.12` 各占一个目录，互不干扰。后面几个是应用，留最新版就够。
 
@@ -127,6 +140,29 @@ envxx init
 
 `tools/` 里放的是可执行文件。`init` 自动写 `.gitignore` 是为了挡住误提交，但挡不住一个本来就带着工具二进制的仓库——clone 别人的项目后就地跑 `envxx` 之前，先看一眼 `.envxx/` 里有什么。
 
+## 只下载安装包的工具
+
+有些软件官方只提供安装程序，没有绿色版。这类工具 EnvXX 只负责下载，不代你安装，也不声称删目录就能卸载：
+
+```bash
+envxx wechat install
+```
+
+它会把 `WeChatWin_4.2.0.exe` 下到 store 的 `downloads/` 里，然后把绝对路径打印出来，你双击自己装。
+
+```bash
+envxx 7zip list      # 已经下过哪些安装包
+envxx 7zip where     # 安装包放在哪
+```
+
+注意几点：
+
+- `list` 列的是 `downloads/` 里的安装包，不是 `tools/` 里的解包版本——这类工具根本不会在 `tools/` 下建目录。
+- `where` 在还没下载时会提示先 `install`。
+- 重复 `install` 不会重新下载，文件已经在就跳过。这类工具没有多版本并存的概念，`downloads/` 里同名文件只会有最新那一份。
+
+微信和企业微信没有可查的历史版本，页面上只挂当前这一版，所以 `search` 只有一行。VS Code 和 7-Zip 能列出全部版本或当前构建。VS Code 在 Windows 上给的是 user 安装包（不需要管理员权限），macOS 给的是 zip。
+
 ## 用 pip 装进去的东西
 
 `pip install` 装到某个 Python 里的控制台脚本，可以按名字直接跑。前提是它确实在那个 Python 的 `Scripts/`（Unix 上是 `bin/`）里：
@@ -153,6 +189,14 @@ Go 走 `dl.google.com`，JDK 走 Adoptium 的 API，两个都是直连，不在�
 关于 CC Switch：官方 CDN 只放了 v4.0.29 之后的文件。老版本还是从 GitHub 取，所以下载先试镜像，404 再回落。版本列表走的是 GitHub 的 tags 接口，四十多 KB 一页，比 releases 接口的几 MB 轻得多。
 
 MobaXterm 没有 API，下载地址里那段数字是构建号，从版本号推不出来。`xterm` 的版本列表是抓官网下载页拿的。它的 changelog 有完整历史和日期，但只给最新两个稳定版挂下载链接，旧版本在列表里标成 `archived`，指定安装会直接报错，不会给你一个死链。另外它只有 Windows 版，其他平台会明确拒绝。
+
+Windows Terminal 走 `microsoft/terminal` 的 releases，只收稳定版：预览版靠 `prerelease` 标记和资产名里的 `WindowsTerminalPreview` 双重过滤，所以 `1.26.x` 这种只在预览通道有的一律不出现。它的版本号是四段（`1.25.3131.0`），`wt` 只给 Windows。装好之后有两个入口：`wt` 是命令行前端（分屏、开新标签），`WindowsTerminal` 是 GUI 本体。
+
+Notepad-- 只收了 Windows 便携包。它发的 macOS 资产是 `.dmg` 安装镜像，Linux 资产停在 v3.8 且命名不统一，两者都不符合"解压就能跑"的模型。arm64 便携包只有部分版本附带（目前只有 3.9.1），所以 arm64 机器上 `search` 只列真正有对应资产的版本，不会给一个必然 404 的下载。
+
+MarkText 是 Electron 应用，Windows 和 macOS 都有 zip，Linux 给 tar.gz。它的压缩包是**扁平**的——`marktext.exe` 和 Electron 运行时文件直接在根目录，没有外层文件夹，所以安装时不剥层。这个项目还在发 `v0.24.0-rc.*`，那些会被过滤掉，只列稳定版。它是少数提供 `SHA256SUMS.txt` 的项目，下载会校验。
+
+DBeaver 的 Windows 和 Linux 有 zip/tar.gz，macOS 只有 dmg，所以 macOS 上会明确报不支持。压缩包解开是一个 `dbeaver/` 目录，里面自带 JRE（约 194MB），安装时剥掉这层。
 
 dufs 默认会换掉自带的简陋界面，用 [mikigo/dufs-shadcn-assets](https://github.com/mikigo/dufs-shadcn-assets) 那套 shadcn 皮肤。第一次 `envxx dufs` 时把资源包下到 `~/.envxx/tools/dufs/.assets`，之后直接用。你自己写了 `--assets` 就以你的为准，其他参数原样透传给 dufs。资源包拿不到时静默退回自带界面，不会因为网络问题让命令失败。
 

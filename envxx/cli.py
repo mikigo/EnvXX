@@ -172,6 +172,56 @@ def _dispatch_run(token: str, rest: list[str]) -> int:
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
+def _installer_path_of(provider: Provider, version: str | None) -> str:
+    """The downloaded installer file, resolved the same way 'install' would."""
+    resolved = provider.resolve(version)
+    path = store.installer_path(provider.plan(resolved).asset.filename)
+    if not path.is_file():
+        raise UsageError(
+            f"{provider.spec.name} {resolved} has not been downloaded yet; "
+            f"run 'envxx {provider.spec.name} install {resolved}'"
+        )
+    return str(path)
+
+
+def _list_installers(spec: ToolSpec) -> None:
+    """Show downloaded installers.
+
+    An installer never lands in tools/, so 'installed' would always be false.
+    What the user wants to know is which installers are sitting in downloads/
+    waiting to be run.
+    """
+    provider = _provider(spec)
+    table = Table(title=f"{spec.name} installers", header_style="bold")
+    table.add_column("version")
+    table.add_column("file")
+    table.add_column("size", justify="right")
+
+    found = 0
+    try:
+        versions = provider.search()
+    except EnvxxError:
+        versions = []
+
+    for info in versions:
+        try:
+            path = store.installer_path(provider.plan(info.version).asset.filename)
+        except EnvxxError:
+            continue
+        if not path.is_file():
+            continue
+        found += 1
+        table.add_row(
+            info.version, _display_path(path), _fmt_size(path.stat().st_size)
+        )
+
+    if not found:
+        err.print(f"[dim]no {spec.name} installers downloaded[/dim]")
+        return
+    out.print(table)
+    err.print("[dim]double-click a file above to install it[/dim]")
+
+
 def _fmt_size(size: int | None) -> str:
     if not size:
         return ""
@@ -256,6 +306,9 @@ def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
     @group.command("list")
     def list_cmd() -> None:
         """Versions already downloaded."""
+        if spec.installer:
+            _list_installers(spec)
+            return
         versions = store.installed_versions(spec.name)
         if not versions:
             err.print(f"[dim]no {spec.name} versions installed[/dim]")
@@ -331,6 +384,9 @@ def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
     def where_cmd(version: str | None = typer.Argument(None)) -> None:
         """Print the absolute path of an installed launcher."""
         provider = _provider(spec)
+        if spec.installer:
+            typer.echo(_installer_path_of(provider, version))
+            return
         installed = store.installed_versions(spec.name)
         resolved = best_match(installed, version) if version else (
             max(installed, key=version_key) if installed else None

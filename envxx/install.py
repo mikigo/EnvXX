@@ -60,6 +60,14 @@ def install(provider: Provider, version: str, *, quiet: bool = False) -> Path:
     would keep saying nothing is wrong and the launch would keep failing.
     """
     tool = provider.spec.name
+    plan = provider.plan(version)
+
+    # An installer is fetched, never unpacked or run: the user double-clicks
+    # it. Everything below this point assumes a portable tree, so this case
+    # leaves before any of it.
+    if plan.download_only:
+        return _fetch_installer(provider, plan, quiet=quiet)
+
     target = store.version_dir(tool, version)
     if _is_complete(provider, version, target):
         return target
@@ -78,7 +86,6 @@ def install(provider: Provider, version: str, *, quiet: bool = False) -> Path:
         if target.is_dir():
             store.remove_version(tool, version)
 
-        plan = provider.plan(version)
         asset = plan.asset
         if not quiet:
             console.print(f"[dim]installing {tool} {version} ({asset.filename})[/dim]")
@@ -115,8 +122,40 @@ def install(provider: Provider, version: str, *, quiet: bool = False) -> Path:
     return target
 
 
+def _fetch_installer(provider: Provider, plan, *, quiet: bool) -> Path:
+    """Download an installer and return where it landed.
+
+    Nothing is unpacked and nothing is executed. Keeping the file in
+    downloads/ means a second run is free, and the caller prints the path so
+    the user can open it from their file manager.
+    """
+    asset = plan.asset
+    store.ensure_dirs()
+    # the original file name, not the de-duplicated cache name: this file is
+    # handed to a person to open, and '26.06-7z2606-x64.exe' is not what the
+    # publisher shipped or what the user expects to see
+    dest = store.installer_path(asset.filename)
+
+    if not quiet:
+        console.print(
+            f"[dim]downloading {provider.spec.name} {plan.version} "
+            f"({asset.filename})[/dim]"
+        )
+
+    expected = _expected_sha256(asset, provider.spec.checksum)
+    if dest.is_file() and expected and http.sha256_file(dest) != expected.lower():
+        dest.unlink()
+    if not dest.is_file():
+        http.download(asset.url, dest, expected=expected, show_progress=not quiet)
+
+    if not quiet:
+        # the absolute path, not the store-relative one: this is meant to be
+        # opened in a file manager or pasted into a shell
+        console.print(f"[green]downloaded[/green] {dest}")
+    return dest
+
+
 def _is_complete(provider: Provider, version: str, target: Path) -> bool:
-    """True when the directory holds a usable install, not just a name."""
     if not target.is_dir():
         return False
     try:

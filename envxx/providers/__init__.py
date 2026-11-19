@@ -14,8 +14,12 @@ from .node_provider import NodeProvider
 from .notepad_minus_minus_provider import NotepadMinusMinusProvider
 from .opencode_provider import OpencodeProvider
 from .python_provider import PythonProvider
+from .sevenzip_provider import SevenZipProvider
 from .spec import Asset, EntryPoint, InstallPlan, ToolSpec, VersionInfo
 from .uv_provider import UvProvider
+from .vscode_provider import VscodeProvider
+from .wechat_provider import WechatProvider
+from .wecom_provider import WecomProvider
 from .windows_terminal_provider import WindowsTerminalProvider
 
 _PROVIDER_TYPES: dict[str, type[Provider]] = {
@@ -33,6 +37,10 @@ _PROVIDER_TYPES: dict[str, type[Provider]] = {
     "notepad--": NotepadMinusMinusProvider,
     "marktext": MarktextProvider,
     "dbeaver": DbeaverProvider,
+    "vscode": VscodeProvider,
+    "7zip": SevenZipProvider,
+    "wechat": WechatProvider,
+    "wecom": WecomProvider,
     "dufs": DufsProvider,
 }
 
@@ -70,6 +78,10 @@ __all__ = [
     "UvProvider",
     "VersionedProvider",
     "VersionInfo",
+    "WecomProvider",
+    "WechatProvider",
+    "VscodeProvider",
+    "SevenZipProvider",
     "WindowsTerminalProvider",
     "provider_for",
     "provider_types",

@@ -134,6 +134,16 @@ def downloads_dir() -> Path:
     return home() / "downloads"
 
 
+def installer_path(filename: str) -> Path:
+    """Where a downloaded installer lives.
+
+    Installers are not unpacked, so downloads/ is their final home rather
+    than a cache. The file keeps the publisher's name; it is something the
+    user opens, not an internal artefact.
+    """
+    return downloads_dir() / filename
+
+
 def locks_dir() -> Path:
     return home() / ".locks"
 

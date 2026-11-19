@@ -99,7 +99,22 @@ envxx python3.11 black .
 ### 支持的工具
 
 运行时（可多版本并存）：`python`、`node`、`go`、`jdk`、`uv`、`bun`
-应用（留最新即可）：`claude`、`opencode`、`cc-switch`、`xterm`、`dufs`
+应用（留最新即可）：`claude`、`opencode`、`cc-switch`、`xterm`、`wt`、`notepad--`、`marktext`、`dbeaver`、`dufs`
+
+`xterm`、`wt`、`notepad--` 只有 Windows 版。`dbeaver` 支持 Windows 和 Linux，macOS 上会报不支持（官方只发 dmg）。`marktext` 三个平台都有。这些限制来自上游发了什么资产，不要假设它们跨平台。
+
+`notepad--` 的 arm64 包只有部分版本附带，arm64 机器上能列的版本比 x64 少得多。`marktext` 的 v0.24 线还在 rc 阶段，会被过滤掉。
+
+### 只下载安装包的工具
+
+`vscode`、`7zip`、`wechat`、`wecom` 是另一类：官方只发安装程序，没有绿色版。
+
+`envxx wechat install` **只下载，不安装**。文件落在 `downloads/`，命令会打印绝对路径，用户自己双击。不要告诉用户这几个工具"装好了"，也不要建议用 `envxx wechat` 直接运行——它们没有可运行的入口。
+
+- `list` 显示已下载的安装包，`where` 给出文件路径。
+- 没下载过时 `where` 会报错并提示先 `install`。
+- 微信和企业微信的目录只有当前版本，`search` 只有一行；VS Code 和 7-Zip 能列历史。
+- 这类工具不占 `tools/`，删 `downloads/` 里的文件就能清掉。
 
 ### Store 位置
 

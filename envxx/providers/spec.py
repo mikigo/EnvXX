@@ -37,6 +37,10 @@ class ToolSpec:
     # dirs inside a version dir where package managers drop console scripts,
     # e.g. 'pip install black' writes Scripts/black.exe on Windows (bin/ on Unix)
     script_dirs: tuple[str, ...] = ()
+    # the tool is an installer, not a portable tree: it is downloaded into
+    # downloads/ and the path handed to the user, who runs it themselves.
+    # Such specs usually declare no entrypoints.
+    installer: bool = False
     checksum: ChecksumKind = "none"
 
     def __post_init__(self) -> None:
@@ -94,3 +98,8 @@ class InstallPlan:
     # for single-file assets: store under this name instead of the asset's
     single_name: str | None = None
     post_install: list[str] = field(default_factory=list)
+    # Installers (.exe/.dmg/.deb/.rpm) are not portable trees: there is
+    # nothing to unpack and nothing to run on the user's behalf. Such a tool
+    # is fetched into downloads/ and the path printed, so the user can run
+    # the installer themselves.
+    download_only: bool = False
