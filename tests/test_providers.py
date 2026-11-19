@@ -10,11 +10,15 @@ from envxx.platforms import Platform
 from envxx.providers import provider_for
 from envxx.providers.cc_switch_provider import CcSwitchProvider
 from envxx.providers.claude_provider import ClaudeProvider
+from envxx.providers.dbeaver_provider import DbeaverProvider
 from envxx.providers.dufs_provider import DufsProvider
+from envxx.providers.marktext_provider import MarktextProvider
 from envxx.providers.mobaxterm_provider import MobaXtermProvider
 from envxx.providers.node_provider import NodeProvider
+from envxx.providers.notepad_minus_minus_provider import NotepadMinusMinusProvider
 from envxx.providers.opencode_provider import OpencodeProvider
 from envxx.providers.python_provider import PythonProvider
+from envxx.providers.windows_terminal_provider import WindowsTerminalProvider
 
 
 @pytest.fixture
@@ -970,3 +974,463 @@ def test_provider_for_registered_tools():
     assert isinstance(provider_for("cc-switch", plat), CcSwitchProvider)
     assert isinstance(provider_for("xterm", plat), MobaXtermProvider)
     assert isinstance(provider_for("dufs", plat), DufsProvider)
+
+
+# -- windows terminal --------------------------------------------------------
+_WT_RELEASES = [
+    {
+        "tag_name": "v1.26.3133.0",
+        "prerelease": True,
+        "draft": False,
+        "assets": [
+            {"name": "Microsoft.WindowsTerminalPreview_1.26.3133.0_x64.zip"},
+            {"name": "Microsoft.WindowsTerminalPreview_1.26.3133.0_8wekyb3d8bbwe.msixbundle"},
+        ],
+    },
+    {
+        "tag_name": "v1.25.3131.0",
+        "prerelease": False,
+        "draft": False,
+        "published_at": "2026-11-01T00:00:00Z",
+        "assets": [
+            {"name": "Microsoft.WindowsTerminal_1.25.3131.0_x64.zip"},
+            {"name": "Microsoft.WindowsTerminal_1.25.3131.0_arm64.zip"},
+            {"name": "Microsoft.WindowsTerminal_1.25.3131.0_x86.zip"},
+        ],
+    },
+    {
+        "tag_name": "v1.25.2733.0",
+        "prerelease": False,
+        "draft": False,
+        "assets": [{"name": "Microsoft.WindowsTerminal_1.25.2733.0_x64.zip"}],
+    },
+    {
+        "tag_name": "v1.24.12741.0",
+        "prerelease": False,
+        "draft": False,
+        "assets": [{"name": "Microsoft.WindowsTerminal_1.24.12741.0_x64.zip"}],
+    },
+]
+
+
+def _wt_provider(plat, monkeypatch, releases=None):
+    payload = _WT_RELEASES if releases is None else releases
+    monkeypatch.setattr(
+        "envxx.http.get_json",
+        lambda url, *a, **k: payload if "page=1" in url else [],
+    )
+    return WindowsTerminalProvider(plat)
+
+
+def test_wt_hides_preview_releases(win, monkeypatch):
+    provider = _wt_provider(win, monkeypatch)
+    # search() lists every stable build, newest first
+    versions = [i.version for i in provider.search()]
+    assert versions == ["1.25.3131.0", "1.25.2733.0", "1.24.12741.0"]
+    # the preview tag must not appear at all
+    assert "1.26.3133.0" not in versions
+
+
+def test_wt_filters_a_preview_that_forgot_its_flag(win, monkeypatch):
+    # a preview release whose asset names carry Preview but whose flag is off
+    sneaky = {
+        "tag_name": "v1.26.9999.0",
+        "prerelease": False,
+        "draft": False,
+        "assets": [{"name": "Microsoft.WindowsTerminalPreview_1.26.9999.0_x64.zip"}],
+    }
+    provider = _wt_provider(win, monkeypatch, [sneaky, *_WT_RELEASES[1:]])
+    versions = [i.version for i in provider.search()]
+    assert "1.26.9999.0" not in versions
+
+
+def test_wt_skips_drafts(win, monkeypatch):
+    draft = {
+        "tag_name": "v1.99.1.0",
+        "prerelease": False,
+        "draft": True,
+        "assets": [{"name": "Microsoft.WindowsTerminal_1.99.1.0_x64.zip"}],
+    }
+    provider = _wt_provider(win, monkeypatch, [draft, *_WT_RELEASES[1:]])
+    assert "1.99.1.0" not in [i.version for i in provider.search()]
+
+
+def test_wt_requires_a_stable_asset_for_this_arch(win, monkeypatch):
+    # arm-only release must not show up on an x64 machine
+    arm_only = {
+        "tag_name": "v1.27.1.0",
+        "prerelease": False,
+        "draft": False,
+        "assets": [{"name": "Microsoft.WindowsTerminal_1.27.1.0_arm64.zip"}],
+    }
+    provider = _wt_provider(win, monkeypatch, [arm_only, *_WT_RELEASES[1:]])
+    assert "1.27.1.0" not in [i.version for i in provider.search()]
+
+
+def test_wt_display_keeps_one_row_per_minor_line(win, monkeypatch):
+    shown = [i.version for i in _wt_provider(win, monkeypatch).display_versions()]
+    assert shown == ["1.25.3131.0", "1.24.12741.0"]
+
+
+@pytest.mark.parametrize(
+    "arch,filename",
+    [
+        ("x64", "Microsoft.WindowsTerminal_1.25.3131.0_x64.zip"),
+        ("arm64", "Microsoft.WindowsTerminal_1.25.3131.0_arm64.zip"),
+    ],
+)
+def test_wt_plan_asset_names(arch, filename):
+    plan = WindowsTerminalProvider(Platform("windows", arch)).plan("1.25.3131.0")
+    assert plan.asset.filename == filename
+    assert plan.asset.url.endswith(f"/v1.25.3131.0/{filename}")
+    assert plan.asset.format == "zip"
+
+
+def test_wt_strips_the_terminal_version_directory(win, monkeypatch):
+    # the archive unpacks to terminal-<version>/, so the wrapper is stripped
+    provider = _wt_provider(win, monkeypatch)
+    assert provider.plan("1.25.3131.0").strip_top is True
+
+
+def test_wt_entrypoints(win):
+    provider = WindowsTerminalProvider(win)
+    assert provider.entrypoint_candidates("wt") == ["wt.exe", "wt"]
+    assert provider.entrypoint_candidates("WindowsTerminal") == [
+        "WindowsTerminal.exe",
+        "WindowsTerminal",
+    ]
+
+
+@pytest.mark.parametrize("plat", ["linux", "macos"])
+def test_wt_is_windows_only(plat, monkeypatch):
+    with pytest.raises(UnsupportedPlatform):
+        _wt_provider(Platform(plat, "x64"), monkeypatch)
+
+
+def test_wt_is_registered():
+    from envxx.providers import provider_for, tool_specs
+
+    assert "wt" in [spec.name for spec in tool_specs()]
+    assert isinstance(
+        provider_for("wt", Platform("windows", "x64")), WindowsTerminalProvider
+    )
+
+
+# -- notepad-- ---------------------------------------------------------------
+_NP_RELEASES = [
+    {
+        "tag_name": "notepad-v3.9.2",
+        "prerelease": False,
+        "draft": False,
+        "published_at": "2026-11-01T00:00:00Z",
+        "assets": [
+            {"name": "Notepad--v3.9.2-win10-portable.zip"},
+            {"name": "Notepad--v3.9.2-mac_arm64_12.3.dmg"},
+            {"name": "Notepad--v3.9.2-plugin-Installer.exe"},
+        ],
+    },
+    {
+        "tag_name": "notepad-v3.9.1",
+        "prerelease": False,
+        "draft": False,
+        "assets": [
+            {"name": "Notepad--v3.9.1-win10-portable.zip"},
+            {"name": "Notepad--v3.9.1-windows-arm64-portable.zip"},
+        ],
+    },
+    {
+        "tag_name": "notepad-v3.9.0",
+        "prerelease": False,
+        "draft": False,
+        "assets": [{"name": "Notepad--v3.9.0-win10-portable.zip"}],
+    },
+]
+
+
+def _np_provider(plat, monkeypatch, releases=None):
+    payload = _NP_RELEASES if releases is None else releases
+    monkeypatch.setattr(
+        "envxx.http.get_json",
+        lambda url, *a, **k: payload if "page=1" in url else [],
+    )
+    return NotepadMinusMinusProvider(plat)
+
+
+def test_notepad_lists_versions_with_a_portable_zip(win, monkeypatch):
+    versions = [i.version for i in _np_provider(win, monkeypatch).search()]
+    assert versions == ["3.9.2", "3.9.1", "3.9.0"]
+
+
+def test_notepad_arm64_only_offers_releases_that_have_an_arm64_zip(
+    monkeypatch,
+):
+    # 3.9.2 and 3.9.0 have no arm64 asset, so offering them would 404
+    provider = _np_provider(Platform("windows", "arm64"), monkeypatch)
+    assert [i.version for i in provider.search()] == ["3.9.1"]
+
+
+def test_notepad_skips_a_release_without_the_zip(win, monkeypatch):
+    dmg_only = {
+        "tag_name": "notepad-v3.8.0",
+        "prerelease": False,
+        "draft": False,
+        "assets": [{"name": "Notepad--v3.8.0-mac_arm64_12.3.dmg"}],
+    }
+    provider = _np_provider(win, monkeypatch, [dmg_only, *_NP_RELEASES])
+    assert "3.8.0" not in [i.version for i in provider.search()]
+
+
+def test_notepad_skips_prereleases_and_drafts(win, monkeypatch):
+    for flag in ("prerelease", "draft"):
+        release = {
+            "tag_name": "notepad-v9.9.9",
+            "prerelease": False,
+            "draft": False,
+            "assets": [{"name": "Notepad--v9.9.9-win10-portable.zip"}],
+        }
+        release[flag] = True
+        provider = _np_provider(win, monkeypatch, [release, *_NP_RELEASES])
+        assert "9.9.9" not in [i.version for i in provider.search()]
+
+
+@pytest.mark.parametrize(
+    "arch,filename",
+    [
+        ("x64", "Notepad--v3.9.2-win10-portable.zip"),
+        ("arm64", "Notepad--v3.9.1-windows-arm64-portable.zip"),
+    ],
+)
+def test_notepad_plan_asset_names(arch, filename):
+    version = "3.9.2" if arch == "x64" else "3.9.1"
+    plan = NotepadMinusMinusProvider(Platform("windows", arch)).plan(version)
+    assert plan.asset.filename == filename
+    assert plan.asset.url.endswith(f"/notepad-v{version}/{filename}")
+    assert plan.asset.format == "zip"
+
+
+def test_notepad_strips_the_portable_version_directory(win, monkeypatch):
+    # the zip unpacks to Notepad--v<version>-win10-portable/
+    provider = _np_provider(win, monkeypatch)
+    assert provider.plan("3.9.2").strip_top is True
+
+
+def test_notepad_entrypoint_keeps_the_double_dash(win, monkeypatch):
+    provider = _np_provider(win, monkeypatch)
+    assert provider.entrypoint_candidates("notepad--") == [
+        "Notepad--.exe",
+        "Notepad--",
+    ]
+
+
+@pytest.mark.parametrize("plat", ["linux", "macos"])
+def test_notepad_is_windows_only(plat, monkeypatch):
+    with pytest.raises(UnsupportedPlatform):
+        _np_provider(Platform(plat, "x64"), monkeypatch)
+
+
+def test_notepad_is_registered():
+    from envxx.providers import provider_for, tool_specs
+
+    assert "notepad--" in [spec.name for spec in tool_specs()]
+    assert isinstance(
+        provider_for("notepad--", Platform("windows", "x64")),
+        NotepadMinusMinusProvider,
+    )
+
+
+# -- marktext ----------------------------------------------------------------
+_MT_RELEASES = [
+    {
+        "tag_name": "v0.24.0-rc.2",
+        "prerelease": True,
+        "draft": False,
+        "assets": [{"name": "marktext-win-x64-0.24.0-rc.2.zip"}],
+    },
+    {
+        "tag_name": "v0.23.0",
+        "prerelease": False,
+        "draft": False,
+        "published_at": "2026-01-01T00:00:00Z",
+        "assets": [
+            {"name": "marktext-win-x64-0.23.0.zip"},
+            {"name": "marktext-win-arm64-0.23.0.zip"},
+            {"name": "marktext-mac-x64-0.23.0.zip"},
+            {"name": "marktext-mac-arm64-0.23.0.zip"},
+            {"name": "marktext-linux-0.23.0.tar.gz"},
+        ],
+    },
+    {
+        "tag_name": "v0.22.0",
+        "prerelease": False,
+        "draft": False,
+        "assets": [{"name": "marktext-win-x64-0.22.0.zip"}],
+    },
+]
+
+
+def _mt_provider(plat, monkeypatch, releases=None):
+    payload = _MT_RELEASES if releases is None else releases
+    monkeypatch.setattr(
+        "envxx.http.get_json",
+        lambda url, *a, **k: payload if "page=1" in url else [],
+    )
+    return MarktextProvider(plat)
+
+
+def test_marktext_hides_release_candidates(win, monkeypatch):
+    versions = [i.version for i in _mt_provider(win, monkeypatch).search()]
+    assert versions == ["0.23.0", "0.22.0"]
+    assert "0.24.0" not in versions
+
+
+def test_marktext_filters_by_asset_not_just_tag(win, monkeypatch):
+    # an arm64-only release must not be offered to an x64 machine
+    arm_only = {
+        "tag_name": "v0.25.0",
+        "prerelease": False,
+        "draft": False,
+        "assets": [{"name": "marktext-win-arm64-0.25.0.zip"}],
+    }
+    provider = _mt_provider(win, monkeypatch, [arm_only, *_MT_RELEASES[1:]])
+    assert "0.25.0" not in [i.version for i in provider.search()]
+
+
+@pytest.mark.parametrize(
+    "plat,arch,filename,strip",
+    [
+        ("windows", "x64", "marktext-win-x64-0.23.0.zip", False),
+        ("windows", "arm64", "marktext-win-arm64-0.23.0.zip", False),
+        ("macos", "arm64", "marktext-mac-arm64-0.23.0.zip", False),
+        ("linux", "x64", "marktext-linux-0.23.0.tar.gz", False),
+    ],
+)
+def test_marktext_plan_asset_names(plat, arch, filename, strip):
+    plan = MarktextProvider(Platform(plat, arch)).plan("0.23.0")
+    assert plan.asset.filename == filename
+    assert plan.asset.url.endswith(f"/v0.23.0/{filename}")
+    # electron-builder archives are flat, so nothing is stripped
+    assert plan.strip_top is strip
+
+
+def test_marktext_uses_the_published_checksum_list(win):
+    plan = MarktextProvider(win).plan("0.23.0")
+    assert plan.asset.sha256_url.endswith("/v0.23.0/SHA256SUMS.txt")
+    assert plan.asset.sha256_filename == plan.asset.filename
+
+
+def test_marktext_entrypoints(win, linux):
+    assert MarktextProvider(win).entrypoint_candidates("marktext") == [
+        "marktext.exe",
+        "marktext",
+    ]
+    assert MarktextProvider(linux).entrypoint_candidates("marktext") == ["marktext"]
+
+
+def test_marktext_is_registered():
+    from envxx.providers import provider_for, tool_specs
+
+    assert "marktext" in [spec.name for spec in tool_specs()]
+    assert isinstance(
+        provider_for("marktext", Platform("windows", "x64")), MarktextProvider
+    )
+
+
+# -- dbeaver -----------------------------------------------------------------
+_DB_RELEASES = [
+    {
+        "tag_name": "26.2.5",
+        "prerelease": False,
+        "draft": False,
+        "published_at": "2026-11-01T00:00:00Z",
+        "assets": [
+            {"name": "dbeaver-ce-26.2.5-windows-x86_64.zip"},
+            {"name": "dbeaver-ce-26.2.5-windows-aarch64.zip"},
+            {"name": "dbeaver-ce-26.2.5-linux-x86_64.tar.gz"},
+            {"name": "dbeaver-ce-26.2.5-macos-x86_64.dmg"},
+        ],
+    },
+    {
+        "tag_name": "26.2.4",
+        "prerelease": False,
+        "draft": False,
+        "assets": [
+            {"name": "dbeaver-ce-26.2.4-windows-x86_64.zip"},
+            {"name": "dbeaver-ce-26.2.4-linux-x86_64.tar.gz"},
+        ],
+    },
+]
+
+
+def _db_provider(plat, monkeypatch, releases=None):
+    payload = _DB_RELEASES if releases is None else releases
+    monkeypatch.setattr(
+        "envxx.http.get_json",
+        lambda url, *a, **k: payload if "page=1" in url else [],
+    )
+    return DbeaverProvider(plat)
+
+
+def test_dbeaver_lists_versions_newest_first(win, monkeypatch):
+    versions = [i.version for i in _db_provider(win, monkeypatch).search()]
+    assert versions == ["26.2.5", "26.2.4"]
+
+
+def test_dbeaver_reports_when_no_release_fits_the_platform(monkeypatch):
+    from envxx.errors import NetworkError
+
+    releases = [
+        {
+            "tag_name": "26.2.5",
+            "prerelease": False,
+            "draft": False,
+            "assets": [{"name": "dbeaver-ce-26.2.5-windows-x86_64.zip"}],
+        }
+    ]
+    provider = _db_provider(Platform("linux", "x64"), monkeypatch, releases)
+    # a linux machine sees no archive at all rather than an x64 windows one
+    with pytest.raises(NetworkError):
+        provider.search()
+
+
+@pytest.mark.parametrize(
+    "plat,arch,filename,fmt",
+    [
+        ("windows", "x64", "dbeaver-ce-26.2.5-windows-x86_64.zip", "zip"),
+        ("windows", "arm64", "dbeaver-ce-26.2.5-windows-aarch64.zip", "zip"),
+        ("linux", "x64", "dbeaver-ce-26.2.5-linux-x86_64.tar.gz", "tar.gz"),
+        ("linux", "arm64", "dbeaver-ce-26.2.5-linux-aarch64.tar.gz", "tar.gz"),
+    ],
+)
+def test_dbeaver_plan_asset_names(plat, arch, filename, fmt):
+    plan = DbeaverProvider(Platform(plat, arch)).plan("26.2.5")
+    assert plan.asset.filename == filename
+    assert plan.asset.format == fmt
+    assert plan.asset.url.endswith(f"/26.2.5/{filename}")
+
+
+def test_dbeaver_strips_the_package_directory(win):
+    # the archive unpacks to a single dbeaver/ directory
+    assert DbeaverProvider(win).plan("26.2.5").strip_top is True
+
+
+def test_dbeaver_entrypoint(win, linux):
+    assert DbeaverProvider(win).entrypoint_candidates("dbeaver") == [
+        "dbeaver.exe",
+        "dbeaver",
+    ]
+    assert DbeaverProvider(linux).entrypoint_candidates("dbeaver") == ["dbeaver"]
+
+
+def test_dbeaver_rejects_macos(monkeypatch):
+    # macOS only ships a dmg, which is an install image, not a portable tree
+    with pytest.raises(UnsupportedPlatform):
+        _db_provider(Platform("macos", "arm64"), monkeypatch)
+
+
+def test_dbeaver_is_registered():
+    from envxx.providers import provider_for, tool_specs
+
+    assert "dbeaver" in [spec.name for spec in tool_specs()]
+    assert isinstance(
+        provider_for("dbeaver", Platform("windows", "x64")), DbeaverProvider
+    )

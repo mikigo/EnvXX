@@ -4,15 +4,19 @@ from .base import AppProvider, Provider, VersionedProvider
 from .bun_provider import BunProvider
 from .cc_switch_provider import CcSwitchProvider
 from .claude_provider import ClaudeProvider
+from .dbeaver_provider import DbeaverProvider
 from .dufs_provider import DufsProvider
 from .go_provider import GoProvider
 from .jdk_provider import JdkProvider
+from .marktext_provider import MarktextProvider
 from .mobaxterm_provider import MobaXtermProvider
 from .node_provider import NodeProvider
+from .notepad_minus_minus_provider import NotepadMinusMinusProvider
 from .opencode_provider import OpencodeProvider
 from .python_provider import PythonProvider
 from .spec import Asset, EntryPoint, InstallPlan, ToolSpec, VersionInfo
 from .uv_provider import UvProvider
+from .windows_terminal_provider import WindowsTerminalProvider
 
 _PROVIDER_TYPES: dict[str, type[Provider]] = {
     "python": PythonProvider,
@@ -25,6 +29,10 @@ _PROVIDER_TYPES: dict[str, type[Provider]] = {
     "opencode": OpencodeProvider,
     "cc-switch": CcSwitchProvider,
     "xterm": MobaXtermProvider,
+    "wt": WindowsTerminalProvider,
+    "notepad--": NotepadMinusMinusProvider,
+    "marktext": MarktextProvider,
+    "dbeaver": DbeaverProvider,
     "dufs": DufsProvider,
 }
 
@@ -46,19 +54,23 @@ __all__ = [
     "AppProvider",
     "BunProvider",
     "CcSwitchProvider",
+    "DbeaverProvider",
     "DufsProvider",
     "EntryPoint",
     "GoProvider",
     "InstallPlan",
     "JdkProvider",
+    "MarktextProvider",
     "MobaXtermProvider",
     "NodeProvider",
+    "NotepadMinusMinusProvider",
     "OpencodeProvider",
     "Provider",
     "ToolSpec",
     "UvProvider",
     "VersionedProvider",
     "VersionInfo",
+    "WindowsTerminalProvider",
     "provider_for",
     "provider_types",
     "tool_specs",
