@@ -96,7 +96,12 @@ class Provider(ABC):
         from .. import store
 
         entry: EntryPoint = self.spec.entrypoint(name)
-        root = store.version_dir(self.spec.name, version)
+        root = store.version_dir(
+            self.spec.name,
+            version,
+            kind=self.spec.kind,
+            scoped=self.spec.kind == "runtime",
+        )
         candidates = self.entrypoint_candidates(entry.name, version)
         for relpath in candidates:
             path = root / relpath
@@ -117,7 +122,12 @@ class Provider(ABC):
             return None
         from .. import store
 
-        root = store.version_dir(self.spec.name, version)
+        root = store.version_dir(
+            self.spec.name,
+            version,
+            kind=self.spec.kind,
+            scoped=self.spec.kind == "runtime",
+        )
         for sub in self.spec.script_dirs:
             for suffix in self.platform.script_suffixes:
                 path = root / sub / (name + suffix)

@@ -95,7 +95,7 @@ def test_install_replaces_a_directory_that_has_no_entrypoint(monkeypatch):
     # an interrupted install leaves the version dir behind with nothing in it;
     # trusting the directory would make the broken state permanent
     provider = _FakePython()
-    root = store.version_dir("python", "3.11.18")
+    root = store.version_dir("python", "3.11.18", kind="runtime", scoped=False)
     root.mkdir(parents=True)
     assert root.is_dir() and not (root / "python.exe").exists()
 
@@ -107,7 +107,7 @@ def test_install_replaces_a_directory_that_has_no_entrypoint(monkeypatch):
 
 def test_install_skips_a_complete_directory(monkeypatch):
     provider = _FakePython()
-    root = store.version_dir("python", "3.11.18")
+    root = store.version_dir("python", "3.11.18", kind="runtime", scoped=False)
     root.mkdir(parents=True)
     (root / "python.exe").write_bytes(b"already here")
 
@@ -121,7 +121,7 @@ def test_install_skips_a_complete_directory(monkeypatch):
 def test_install_replaces_a_directory_whose_entrypoint_is_missing(monkeypatch):
     # the directory looks populated but the launcher is gone
     provider = _FakePython()
-    root = store.version_dir("python", "3.11.18")
+    root = store.version_dir("python", "3.11.18", kind="runtime", scoped=False)
     (root / "Lib").mkdir(parents=True)
 
     result = _install_with_fake(monkeypatch, provider)
@@ -136,12 +136,12 @@ def test_remove_version_clears_read_only_files(tmp_path, monkeypatch):
     import os
 
     monkeypatch.setenv(store.HOME_ENV, str(tmp_path / "home"))
-    root = store.version_dir("python", "3.11.18")
+    root = store.version_dir("python", "3.11.18", kind="runtime", scoped=False)
     (root / "bin").mkdir(parents=True)
     locked = root / "bin" / "stale.dll"
     locked.write_bytes(b"x")
     os.chmod(locked, 0o444)
 
-    store.remove_version("python", "3.11.18")
+    store.remove_version("python", "3.11.18", kind="runtime")
 
     assert not root.exists()

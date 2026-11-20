@@ -150,7 +150,7 @@ def test_module_fallback_pip(tmp_path, monkeypatch):
     from envxx.run import resolve_command
 
     monkeypatch.setenv(store.HOME_ENV, str(tmp_path / "home"))
-    venv = store.version_dir("python", "3.11.18")
+    venv = store.version_dir("python", "3.11.18", kind="runtime", scoped=False)
     venv.mkdir(parents=True)
     (venv / "python.exe").write_bytes(b"")
 
@@ -320,7 +320,7 @@ def test_claude_flag_run_dispatches_to_the_binary(monkeypatch):
         "P", (), {"spec": spec, "resolve": lambda self, q: "2.1.325"}
     )())
     monkeypatch.setattr("envxx.cli.runner.run", lambda p, v, a, entrypoint=None: calls.append((v, a, entrypoint)) or 0)
-    monkeypatch.setattr("envxx.cli.store.installed_versions", lambda name: ["2.1.325"])
+    monkeypatch.setattr("envxx.cli.store.installed_versions", lambda name, kind="app", scoped=False: ["2.1.325"])
 
     assert _dispatch_run("claude", ["--version"]) == 0
     assert calls == [("2.1.325", ["--version"], None)]
@@ -352,7 +352,7 @@ def test_dispatch_run_reads_a_launcher_before_the_default(
         "envxx.cli.runner.run",
         lambda p, v, a, entrypoint=None: calls.append((v, a, entrypoint)) or 0,
     )
-    monkeypatch.setattr("envxx.cli.store.installed_versions", lambda name: ["22.23.5"])
+    monkeypatch.setattr("envxx.cli.store.installed_versions", lambda name, kind="app", scoped=False: ["22.23.5"])
 
     assert _dispatch_run(token, rest) == 0
     assert calls == [("22.23.5", expected_args, expected_entry)]
@@ -370,7 +370,7 @@ def test_python_entrypoint_shorthand(monkeypatch):
         "envxx.cli.runner.run",
         lambda p, v, a, entrypoint=None: calls.append((v, a, entrypoint)) or 0,
     )
-    monkeypatch.setattr("envxx.cli.store.installed_versions", lambda name: ["3.11.18"])
+    monkeypatch.setattr("envxx.cli.store.installed_versions", lambda name, kind="app", scoped=False: ["3.11.18"])
 
     assert _dispatch_run("python3.11", ["pip", "install", "requests"]) == 0
     assert calls == [("3.11.18", ["install", "requests"], "pip")]
@@ -407,7 +407,7 @@ def test_console_script_installed_by_pip_is_found(
     _force_platform(monkeypatch, os_name)
 
     version = "3.11.18"
-    root = store.version_dir("python", version)
+    root = store.version_dir("python", version, kind="runtime", scoped=False)
     (root / script_dir).mkdir(parents=True)
     (root / script_dir / script_name).write_bytes(b"")
 
@@ -416,7 +416,7 @@ def test_console_script_installed_by_pip_is_found(
         "envxx.cli.runner.run",
         lambda p, v, a, entrypoint=None: calls.append((v, a, entrypoint)) or 0,
     )
-    monkeypatch.setattr("envxx.cli.store.installed_versions", lambda name: [version])
+    monkeypatch.setattr("envxx.cli.store.installed_versions", lambda name, kind="app", scoped=False: [version])
 
     assert _dispatch_run("python3.11", ["envxx", "--version"]) == 0
     assert calls == [(version, ["--version"], "envxx")]
@@ -438,7 +438,7 @@ def test_a_name_that_is_not_a_console_script_stays_an_argument(
     _force_platform(monkeypatch, os_name)
 
     version = "3.11.18"
-    root = store.version_dir("python", version)
+    root = store.version_dir("python", version, kind="runtime", scoped=False)
     (root / script_dir).mkdir(parents=True)
     (root / script_dir / script_name).write_bytes(b"")
 
@@ -455,7 +455,7 @@ def test_a_name_that_is_not_a_console_script_stays_an_argument(
 
 def test_script_lookup_refuses_names_that_climb_out(tmp_path):
     version = "3.11.18"
-    root = store.version_dir("python", version)
+    root = store.version_dir("python", version, kind="runtime", scoped=False)
     (root / "Scripts").mkdir(parents=True)
     # a file placed outside the runtime must not be reachable by name
     (root.parent / "outside.exe").write_bytes(b"")
@@ -478,7 +478,7 @@ def test_missing_console_script_names_the_fix(tmp_path, monkeypatch):
     from envxx.run import resolve_command
 
     version = "3.11.18"
-    root = store.version_dir("python", version)
+    root = store.version_dir("python", version, kind="runtime", scoped=False)
     root.mkdir(parents=True)
     (root / "python.exe").write_bytes(b"")
 

@@ -1,7 +1,7 @@
 ---
 name: envxx
 description: |
-  使用 EnvXX 管理免安装的 Python、Node.js、Go、JDK、uv、Bun 运行时，以及在 EnvXX 仓库里新增一个工具 provider。
+  使用 EnvXX 管理免安装的 Python、Node.js、Go、JDK 运行时，以及在 EnvXX 仓库里新增一个工具 provider。
   当用户需要运行某个版本的 Python/Node/Go/Java、抱怨机器上没有装某种运行时、想把工具下载到本地目录而不是全局安装、
   需要给项目单独准备一套运行时、或者问"这个项目怎么加一个新工具"时使用。也适用于用户提到 envxx 命令、~/.envxx 目录、
   项目级 .envxx、portable/免安装运行时、绿色版工具、多版本并存、或希望删掉一个目录就等于卸载的场景。
@@ -38,7 +38,7 @@ envxx go1.27 version
 envxx claude                               # 应用类，写名字就行
 ```
 
-选择器把工具名和版本连在一起写：`python3.11`、`node22`、`go1.27`、`jdk21`、`uv0.13`、`bun1.4`。别名也认：`golang1.27` 等于 `go1.27`，`java21` 和 `temurin21` 等于 `jdk21`，`nodejs22` 等于 `node22`。裸写工具名（`envxx node`）走的是子命令帮助，不会执行。
+选择器把工具名和版本连在一起写：`python3.11`、`node22`、`go1.27`、`jdk21`。别名也认：`golang1.27` 等于 `go1.27`，`java21` 和 `temurin21` 等于 `jdk21`，`nodejs22` 等于 `node22`。裸写工具名（`envxx node`）走的是子命令帮助，不会执行。
 
 ### 管理子命令
 
@@ -73,7 +73,6 @@ envxx python3.11 pip install requests
 envxx node22 npm run dev
 envxx node22 npx create-vite
 envxx go1.27 gofmt -l .
-envxx uv0.13 uvx ruff check .
 ```
 
 `envxx run` 是给脚本拼接用的等价写法：
@@ -83,7 +82,7 @@ envxx run python@3.11:pip --version
 envxx run node@22:npm --version
 ```
 
-**默认入口不要重复写。** JDK 的默认入口是 `java`，`envxx jdk21 --version` 对，`envxx jdk21 java --version` 会把 `java` 当参数传给 java 自己，报 `ClassNotFoundException`。同理 `envxx node22 node -v` 不成立。只有非默认入口（`pip`、`npm`、`javac`、`gofmt`、`uvx`）才需要显式写。
+**默认入口不要重复写。** JDK 的默认入口是 `java`，`envxx jdk21 --version` 对，`envxx jdk21 java --version` 会把 `java` 当参数传给 java 自己，报 `ClassNotFoundException`。同理 `envxx node22 node -v` 不成立。只有非默认入口（`pip`、`npm`、`javac`、`gofmt`）才需要显式写。
 
 ### 装进运行时的命令
 
@@ -98,7 +97,7 @@ envxx python3.11 black .
 
 ### 支持的工具
 
-运行时（可多版本并存）：`python`、`node`、`go`、`jdk`、`uv`、`bun`
+运行时（可多版本并存）：`python`、`node`、`go`、`jdk`
 应用（留最新即可）：`claude`、`opencode`、`cc-switch`、`xterm`、`wt`、`notepad--`、`marktext`、`dbeaver`、`git`、`dufs`
 
 `xterm`、`wt`、`notepad--` 只有 Windows 版。`dbeaver` 支持 Windows 和 Linux，macOS 上会报不支持（官方只发 dmg）。`marktext` 三个平台都有。这些限制来自上游发了什么资产，不要假设它们跨平台。
@@ -123,11 +122,16 @@ Python 的版本目录来自 Astral 的官方索引，覆盖 3.8 到 3.16 的全
 
 ### Store 位置
 
-优先级：`ENVXX_HOME` → 从 cwd 向上找到的项目级 `.envxx` → `~/.envxx`。
+全局 store 按类型分两个目录：`~/.envxx/runtime/`（python、node、go、jdk）和 `~/.envxx/app/`（其余所有）。`downloads/`、`cache/`、`.locks/` 也在全局，跨项目共用。
 
-项目级由 `envxx init` 创建，含 `tools/ downloads/ cache/ .locks/` 和一个 `.project` 标记文件，并自动写进 `.gitignore`。向上查找只认带标记的目录，家目录本身不算项目级。
+**只有运行时能进项目级。** 优先级：`ENVXX_HOME` → 从 cwd 向上找到的项目级 `.envxx`（仅 runtime） → `~/.envxx`。
 
-写命令时注意：在带 `.envxx` 的仓库里执行 `envxx`，装的东西进项目目录，不是全局。用户如果问"为什么没装到 ~/.envxx"，先看有没有项目级 store。
+项目级由 `envxx init` 创建，只有 `runtime/` 和一个 `.project` 标记文件，并自动写进 `.gitignore`。向上查找只认带标记的目录，家目录本身不算项目级。`ENVXX_HOME` 一旦设置，项目 store 完全不参与。
+
+写命令时注意两点：
+
+- 在带 `.envxx` 的仓库里装 runtime，装进项目；装应用，永远进全局。
+- `envxx <tool> list` 对运行时只列项目里的（有项目 store 时），不会把全局的混进来。用户问"为什么看不到某版本"，先确认是不是装在全局了。
 
 ## 扩展：加一个工具
 
@@ -135,7 +139,7 @@ Python 的版本目录来自 Astral 的官方索引，覆盖 3.8 到 3.16 的全
 
 最短路径：
 
-1. 读 `envxx/providers/uv_provider.py`（最简单：GitHub release，二进制在包根）和 `envxx/providers/go_provider.py`（清单自带 sha256）当模板。
+1. 读 `envxx/providers/git_provider.py`（GitHub release，zip 解包）和 `envxx/providers/go_provider.py`（清单自带 sha256）当模板。
 2. 新建 `envxx/providers/<tool>_provider.py`，定义 `ToolSpec` 和 `Provider` 子类。
 3. 在 `envxx/providers/__init__.py` 的 `_PROVIDER_TYPES` 登记，补 `__all__`。
 4. 在 `tests/test_runtimes.py` 或 `tests/test_providers.py` 加用例，用假 payload，不联网。
@@ -156,9 +160,8 @@ Python 的版本目录来自 Astral 的官方索引，覆盖 3.8 到 3.16 的全
 - **同名参数被当成脚本。** `envxx python3.12 install` 曾经在装完之后让 Python 去找名为 `install` 的文件。管理命令名要认得出来，见 `MANAGE_COMMANDS`。
 - **默认入口重复写。** `envxx jdk21 java -version` 必然失败，见「换入口」。
 - **macOS 的 JDK 是 bundle**：`Contents/Home/bin/java`，Windows/Linux 是 `bin/java`。
-- **包的顶层目录不能猜。** Go 的顶层叫 `go`，bun 的叫 `bun-windows-x64`，ripgrep 12 之前还是平铺的。
+- **包的顶层目录不能猜。** Go 的顶层叫 `go`，ripgrep 12 之前还是平铺的，MinGit 也是平铺。
 - **Adoptium 版本字段不一致**：`openjdk_version` 可能四段也可能 `27+35`，用 `semver` 再剥 `+`。
-- **独立版 Bun 没有 `bunx`**：只有 `bun.exe`，`bunx` 是 npm 安装时创建的。
 - **Git Bash 的 `test -f foo` 对 `foo.exe` 也返回真**，`basename` 会丢扩展名。
 - **`hasattr` 判断可选方法**通常说明它该在基类里。
 

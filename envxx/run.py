@@ -21,7 +21,12 @@ def _prepare_argv(exe: Path, args: list[str]) -> list[str]:
 def env_for(provider: Provider, version: str) -> dict[str, str]:
     """Child env with the version's launcher dirs prepended to PATH."""
     env = dict(os.environ)
-    root = store.version_dir(provider.spec.name, version)
+    root = store.version_dir(
+        provider.spec.name,
+        version,
+        kind=provider.spec.kind,
+        scoped=provider.spec.kind == "runtime",
+    )
     prefixes = []
     for sub in ("Scripts", "bin"):
         path = root / sub

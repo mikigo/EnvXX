@@ -60,6 +60,9 @@ def install(provider: Provider, version: str, *, quiet: bool = False) -> Path:
     would keep saying nothing is wrong and the launch would keep failing.
     """
     tool = provider.spec.name
+    # runtimes may live in a project store; applications never do
+    kind = provider.spec.kind
+    scoped = kind == "runtime"
     plan = provider.plan(version)
 
     # An installer is fetched, never unpacked or run: the user double-clicks
@@ -68,7 +71,7 @@ def install(provider: Provider, version: str, *, quiet: bool = False) -> Path:
     if plan.download_only:
         return _fetch_installer(provider, plan, quiet=quiet)
 
-    target = store.version_dir(tool, version)
+    target = store.version_dir(tool, version, kind=kind, scoped=scoped)
     if _is_complete(provider, version, target):
         return target
     if target.is_dir():
@@ -76,15 +79,15 @@ def install(provider: Provider, version: str, *, quiet: bool = False) -> Path:
             console.print(
                 f"[yellow]{tool} {version} is present but incomplete, reinstalling[/yellow]"
             )
-        store.remove_version(tool, version)
+        store.remove_version(tool, version, kind=kind, scoped=scoped)
 
-    store.ensure_dirs()
+    store.ensure_dirs(scoped=scoped)
     with store.install_lock(tool, version):
         # another process may have finished while we waited
         if _is_complete(provider, version, target):
             return target
         if target.is_dir():
-            store.remove_version(tool, version)
+            store.remove_version(tool, version, kind=kind, scoped=scoped)
 
         asset = plan.asset
         if not quiet:
@@ -97,7 +100,7 @@ def install(provider: Provider, version: str, *, quiet: bool = False) -> Path:
         if not dest.is_file():
             http.download(asset.url, dest, expected=expected, show_progress=not quiet)
 
-        staging = store.temp_dir(tool)
+        staging = store.temp_dir(tool, kind=kind, scoped=scoped)
         try:
             if asset.format == "exe":
                 archive.copy_single(dest, staging, name=plan.single_name)
@@ -108,7 +111,7 @@ def install(provider: Provider, version: str, *, quiet: bool = False) -> Path:
 
             target.parent.mkdir(parents=True, exist_ok=True)
             if target.exists():
-                store.remove_version(tool, version)
+                store.remove_version(tool, version, kind=kind, scoped=scoped)
             store.activate(staging, target)
         finally:
             if staging.exists():

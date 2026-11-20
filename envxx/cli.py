@@ -84,9 +84,41 @@ def _provider(spec: ToolSpec) -> Provider:
 # ---------------------------------------------------------------------------
 # version resolution
 # ---------------------------------------------------------------------------
+def _scoped(spec: ToolSpec) -> bool:
+    """Whether this tool's store operations address the project store.
+
+    True only for a runtime inside an initialised project. Applications stay
+    in the global store wherever they are run from, and a runtime outside a
+    project has no project store to address.
+    """
+    return spec.kind == "runtime" and store.project_store() is not None
+
+
+def _installed_versions(provider: Provider) -> list[str]:
+    """Versions already on disk for this tool, project store first.
+
+    A runtime can be installed in a project store or the global one, and a
+    run should use whichever has the version asked for. Applications only
+    ever live in the global store, so there is one place to look.
+    """
+    spec = provider.spec
+    if spec.kind != "runtime" or store.project_store() is None:
+        return store.installed_versions(spec.name, kind=spec.kind)
+
+    # project versions win on a tie, so union with project first
+    seen: list[str] = []
+    for scoped in (True, False):
+        for version in store.installed_versions(
+            spec.name, kind=spec.kind, scoped=scoped
+        ):
+            if version not in seen:
+                seen.append(version)
+    return seen
+
+
 def _ensure_installed(provider: Provider, query: str | None) -> str:
     """An installed match wins; otherwise resolve remotely and install it."""
-    installed = store.installed_versions(provider.spec.name)
+    installed = _installed_versions(provider)
     if query is None:
         if installed:
             return max(installed, key=version_key)
@@ -96,7 +128,9 @@ def _ensure_installed(provider: Provider, query: str | None) -> str:
             return match
 
     version = provider.resolve(query)
-    if not store.is_installed(provider.spec.name, version):
+    kind = provider.spec.kind
+    scoped = kind == "runtime"
+    if not store.is_installed(provider.spec.name, version, kind=kind, scoped=scoped):
         installer.install(provider, version)
     return version
 
@@ -276,7 +310,7 @@ def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
         else:
             infos = provider.display_versions()
         # every catalogue is newest first, so an app list only needs trimming
-        installed = set(store.installed_versions(spec.name))
+        installed = set(_installed_versions(provider))
         hidden = 0
         if spec.kind == "app" and not all_versions and len(infos) > SEARCH_LIMIT:
             hidden = len(infos) - SEARCH_LIMIT
@@ -310,7 +344,13 @@ def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
         if spec.installer:
             _list_installers(spec)
             return
-        versions = store.installed_versions(spec.name)
+        # a runtime's list shows the project store when there is one: that is
+        # the set a run from this directory actually uses, and mixing in the
+        # global installs would hide which of them belong to the project
+        scoped = spec.kind == "runtime" and store.project_store() is not None
+        versions = store.installed_versions(
+            spec.name, kind=spec.kind, scoped=scoped
+        )
         if not versions:
             err.print(f"[dim]no {spec.name} versions installed[/dim]")
             return
@@ -319,7 +359,9 @@ def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
         table.add_column("path")
         table.add_column("size", justify="right")
         for version in sorted(versions, key=version_key, reverse=True):
-            path = store.version_dir(spec.name, version)
+            path = store.version_dir(
+                spec.name, version, kind=spec.kind, scoped=scoped
+            )
             table.add_row(version, _display_path(path), _fmt_size(_dir_size(path)))
         out.print(table)
 
@@ -334,8 +376,13 @@ def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
         """Download and install a version."""
         provider = _provider(spec)
         resolved = provider.resolve(version)
-        if force and store.is_installed(spec.name, resolved):
-            store.remove_version(spec.name, resolved)
+        scoped = _scoped(spec)
+        if force and store.is_installed(
+            spec.name, resolved, kind=spec.kind, scoped=scoped
+        ):
+            store.remove_version(
+                spec.name, resolved, kind=spec.kind, scoped=scoped
+            )
         installer.install(provider, resolved)
 
     # apps get an 'rm' shorthand below; listing both with the same description
@@ -346,7 +393,10 @@ def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
         yes: bool = typer.Option(False, "--yes", "-y", help="skip confirmation"),
     ) -> None:
         """Remove an installed version."""
-        versions = store.installed_versions(spec.name)
+        scoped = _scoped(spec)
+        versions = store.installed_versions(
+            spec.name, kind=spec.kind, scoped=scoped
+        )
         if not versions:
             raise UsageError(f"no {spec.name} versions installed")
         target = best_match(versions, version) if version else max(versions, key=version_key)
@@ -354,7 +404,7 @@ def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
             raise UsageError(f"{spec.name} {version} is not installed")
         if not yes and not typer.confirm(f"remove {spec.name} {target}?", default=False):
             raise typer.Abort()
-        store.remove_version(spec.name, target)
+        store.remove_version(spec.name, target, kind=spec.kind, scoped=scoped)
         out.print(f"removed {spec.name} {target}")
 
     if spec.kind == "app":
@@ -366,7 +416,10 @@ def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
             """Install the newest version and point the default at it."""
             provider = _provider(spec)
             latest = provider.default_version()
-            installed = store.installed_versions(spec.name)
+            scoped = _scoped(spec)
+            installed = store.installed_versions(
+                spec.name, kind=spec.kind, scoped=scoped
+            )
             if latest in installed:
                 out.print(f"{spec.name} {latest} is already the latest")
             else:
@@ -388,7 +441,7 @@ def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
         if spec.installer:
             typer.echo(_installer_path_of(provider, version))
             return
-        installed = store.installed_versions(spec.name)
+        installed = _installed_versions(provider)
         resolved = best_match(installed, version) if version else (
             max(installed, key=version_key) if installed else None
         )
@@ -445,6 +498,35 @@ def _ensure_ignored(root: Path) -> str | None:
     return f"added {line} to {path.name}"
 
 
+def _migrate_store(path: Path) -> list[tuple[str, str]]:
+    """Move a pre-layout-2 store into runtime/ and app/ once.
+
+    Called from init and from startup, so an existing store is converted the
+    first time it is used rather than sitting invisible under the old
+    'tools/' directory that nothing reads any more.
+    """
+    if not store.store_needs_migration(path):
+        return []
+    runtime_names = {spec.name for spec in tool_specs() if spec.kind == "runtime"}
+    return store.migrate_layout(
+        path, runtime_names, global_store=store.global_home()
+    )
+
+
+def _migrate_any_store() -> None:
+    """Convert whichever stores this invocation can see.
+
+    A runtime install may target the project store or the global one, so both
+    are checked; each one records that it is done in its marker file.
+    """
+    seen: set[Path] = set()
+    for candidate in (store.project_store(), store.global_home()):
+        if candidate is None or candidate in seen:
+            continue
+        seen.add(candidate)
+        _migrate_store(candidate)
+
+
 @app.command("init")
 def init_cmd(
     directory: Path | None = typer.Argument(
@@ -468,8 +550,15 @@ def init_cmd(
         note = _ensure_ignored(root)
         if note:
             out.print(f"[dim]{note}[/dim]")
+
+    moved = _migrate_store(path)
+    if moved:
+        for tool, kind in moved:
+            out.print(f"[dim]moved {tool} to {kind}/[/dim]")
+
     out.print(
-        "[dim]tool versions installed from here stay in this directory[/dim]"
+        "[dim]runtimes installed from here stay in this directory; "
+        "applications always go to the global store[/dim]"
     )
 
 
@@ -510,6 +599,15 @@ def main(argv: list[str] | None = None) -> int:
     if argv and argv[0] in ("--version", "-V"):
         typer.echo(f"envxx {__version__}")
         return 0
+
+    # a store made before the runtime/app split would otherwise be invisible
+    # to every command below, since nothing reads 'tools/' any more
+    try:
+        _migrate_any_store()
+    except OSError:
+        # an unwritable store is a problem for the command that needs it, not
+        # for 'envxx --help'
+        pass
 
     try:
         if argv:

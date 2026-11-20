@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from .base import AppProvider, Provider, VersionedProvider
-from .bun_provider import BunProvider
 from .cc_switch_provider import CcSwitchProvider
 from .claude_provider import ClaudeProvider
 from .dbeaver_provider import DbeaverProvider
@@ -17,7 +16,6 @@ from .opencode_provider import OpencodeProvider
 from .python_provider import PythonProvider
 from .sevenzip_provider import SevenZipProvider
 from .spec import Asset, EntryPoint, InstallPlan, ToolSpec, VersionInfo
-from .uv_provider import UvProvider
 from .vscode_provider import VscodeProvider
 from .wechat_provider import WechatProvider
 from .wecom_provider import WecomProvider
@@ -28,8 +26,6 @@ _PROVIDER_TYPES: dict[str, type[Provider]] = {
     "node": NodeProvider,
     "go": GoProvider,
     "jdk": JdkProvider,
-    "uv": UvProvider,
-    "bun": BunProvider,
     "claude": ClaudeProvider,
     "opencode": OpencodeProvider,
     "cc-switch": CcSwitchProvider,
@@ -62,7 +58,6 @@ def provider_for(name: str, platform) -> Provider:
 __all__ = [
     "Asset",
     "AppProvider",
-    "BunProvider",
     "CcSwitchProvider",
     "DbeaverProvider",
     "DufsProvider",
@@ -78,7 +73,6 @@ __all__ = [
     "OpencodeProvider",
     "Provider",
     "ToolSpec",
-    "UvProvider",
     "VersionedProvider",
     "VersionInfo",
     "WecomProvider",
