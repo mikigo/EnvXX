@@ -5,13 +5,12 @@ import re
 from ..errors import NetworkError, UnsupportedPlatform
 from ..versions import version_key
 from .base import AppProvider
-from .spec import Asset, EntryPoint, InstallPlan, ToolSpec, VersionInfo
+from .spec import Asset, InstallPlan, ToolSpec, VersionInfo
 
-# Git for Windows publishes three shapes: an installer (.exe), a
-# self-extracting PortableGit.7z.exe, and MinGit-*.zip. Only the zip is a
-# plain archive that can be unpacked into a portable tree, so that is what
-# this provider uses. MinGit is the trimmed build (no GUI, no Perl) and is
-# what the project ships for embedding; git itself is complete.
+# Git for Windows publishes an installer, a PortableGit self-extracting exe
+# and a MinGit zip. The installer is the one the project's own download page
+# points at and the one the user expects; it also registers git in the shell
+# the way the upstream project intends, which a hand-unpacked tree does not.
 _REPO = "https://api.github.com/repos/git-for-windows/git"
 _DOWNLOAD = "https://github.com/git-for-windows/git/releases/download"
 _PAGE = 30
@@ -20,16 +19,9 @@ GIT_SPEC = ToolSpec(
     name="git",
     kind="app",
     versioned=True,
-    summary="Git for Windows (MinGit portable zip)",
+    summary="Git for Windows installer from git-scm.com",
     selector_prefixes=("git",),
-    # MinGit unpacks flat: cmd/, usr/, ucrt64/ sit at the archive root.
-    # cmd/git.exe is the launcher Git for Windows puts on PATH; the real
-    # binary lives at ucrt64/bin/git.exe.
-    entrypoints=(
-        EntryPoint("git", "cmd/git"),
-        EntryPoint("scalar", "cmd/scalar"),
-    ),
-    default_entrypoint="git",
+    installer=True,
     checksum="none",
 )
 
@@ -38,17 +30,16 @@ GIT_SPEC = ToolSpec(
 # version, and only the full tag says which file to fetch.
 _TAG_RE = re.compile(r"^v(?P<version>\d+(?:\.\d+)+\.windows\.\d+)$")
 
-# host arch -> the suffix in the archive name. MinGit also ships -32-bit and
-# -busybox variants; neither is what a modern Windows install wants.
+# host arch -> the suffix in the installer name
 _ARCH = {"x64": "64-bit", "arm64": "arm64"}
 
 
 class GitProvider(AppProvider):
-    """Git for Windows, unpacked from the MinGit zip.
+    """Git for Windows, fetched as the official installer.
 
-    MinGit is the smallest build that still provides a working git: the
-    archive is 38 MB versus 60 MB for PortableGit, and unlike PortableGit it
-    is a plain zip rather than a self-extracting executable.
+    The installer is left for the user to run: it writes to Program Files,
+    adds shell integration and sets up the credential manager, all of which
+    are decisions for the person installing, not for envxx.
     """
 
     spec = GIT_SPEC
@@ -97,20 +88,20 @@ class GitProvider(AppProvider):
             page += 1
 
         if not result:
-            raise NetworkError("git-for-windows has no release with a MinGit zip")
+            raise NetworkError("git-for-windows has no release with an installer")
         return result
 
     def _asset_name(self, version: str) -> str:
-        """Map a tag's version part to the archive's file name.
+        """Map a tag's version part to the installer's file name.
 
         The first repackaging of a version drops its number: tag
-        'v2.56.0.windows.1' ships 'MinGit-2.56.0-64-bit.zip', while
-        'v2.56.0.windows.4' ships 'MinGit-2.56.0.4-64-bit.zip'.
+        'v2.56.0.windows.1' ships 'Git-2.56.0-64-bit.exe', while
+        'v2.56.0.windows.4' ships 'Git-2.56.0.4-64-bit.exe'.
         """
         base, _, repack = version.partition(".windows.")
         if repack and repack != "1":
             base = f"{base}.{repack}"
-        return f"MinGit-{base}-{self._arch}.zip"
+        return f"Git-{base}-{self._arch}.exe"
 
     def plan(self, version: str) -> InstallPlan:
         name = self._asset_name(version)
@@ -119,10 +110,11 @@ class GitProvider(AppProvider):
             asset=Asset(
                 url=f"{_DOWNLOAD}/v{version}/{name}",
                 filename=name,
-                format="zip",
+                # an installer: downloaded and offered to the user, never
+                # unpacked and never run by envxx on its own
+                format="exe",
             ),
-            # MinGit is flat: cmd/ and usr/ sit at the archive root
-            strip_top=False,
+            download_only=True,
         )
 
     def display_versions(self) -> list[VersionInfo]:
@@ -144,9 +136,3 @@ class GitProvider(AppProvider):
         return sorted(
             best.values(), key=lambda info: version_key(info.version), reverse=True
         )
-
-    def entrypoint_candidates(
-        self, name: str, version: str | None = None
-    ) -> list[str]:
-        entry = self.spec.entrypoint(name)
-        return [entry.relpath + ".exe", entry.relpath]

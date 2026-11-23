@@ -68,7 +68,7 @@ def _expand(value: str) -> str:
 def _reject_path_name(name: str) -> None:
     if name.upper() == _PATH_NAME:
         raise UsageError(
-            "use 'envxx set_path' for PATH: replacing it wholesale would "
+            "use 'envxx set-path' for PATH: replacing it wholesale would "
             "drop every existing entry"
         )
 
@@ -288,12 +288,15 @@ def _split_path(value: str) -> list[str]:
     return [part for part in value.split(os.pathsep) if part]
 
 
-def set_path(directory: str, system: bool = False) -> tuple[str, bool]:
-    """Append a directory to PATH. Returns (expanded path, whether it changed).
+def set_path(
+    directory: str, system: bool = False, *, append: bool = False
+) -> tuple[str, bool]:
+    """Put a directory on PATH. Returns (expanded path, whether it changed).
 
-    An entry already present is left alone: running the command twice must
-    not put the same directory on PATH twice, and a PATH with duplicates
-    grows without bound.
+    Prepended by default: a directory the user just asked to add is the one
+    they want to win, and later entries in PATH lose to earlier ones. An
+    entry already present is left where it is, so running the command twice
+    does not reorder a PATH or grow it with duplicates.
     """
     if system and not supports_system_scope():
         raise UsageError("system scope is not supported on this platform")
@@ -306,8 +309,13 @@ def set_path(directory: str, system: bool = False) -> tuple[str, bool]:
         return expanded, False
 
     _snapshot("path", _PATH_NAME, current)
+    if append:
+        entries = [*entries, expanded]
+    else:
+        entries = [expanded, *entries]
+
     if is_windows():
-        _win_write(_PATH_NAME, os.pathsep.join([*entries, expanded]), system)
+        _win_write(_PATH_NAME, os.pathsep.join(entries), system)
         _win_broadcast()
     else:
         _posix_write_rc(_PATH_NAME, f'export PATH="{expanded}:$PATH"')

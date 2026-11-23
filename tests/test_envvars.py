@@ -48,7 +48,7 @@ def test_a_home_relative_directory_is_expanded(tmp_path, monkeypatch):
 # -- refusing to replace PATH ------------------------------------------------
 def test_set_env_refuses_to_replace_path():
     """A wholesale PATH replacement silently drops every existing entry."""
-    with pytest.raises(UsageError, match="set_path"):
+    with pytest.raises(UsageError, match="set-path"):
         envvars.set_env("PATH", "C:/only/this")
 
 
@@ -204,3 +204,159 @@ def test_require_installed_defaults_to_the_newest(home, monkeypatch):
         "envxx.store.installed_versions", lambda *a, **k: ["3.11.18", "3.12.16"]
     )
     assert shims.require_installed(_StubProvider(), None) == "3.12.16"
+
+
+# -- shims always point at the global store ----------------------------------
+def test_a_runtime_shim_ignores_the_project_store(tmp_path, monkeypatch):
+    """PATH is machine-wide, so a shim must not point into a checkout.
+
+    Pointing it at a project's runtime makes the command die the moment that
+    directory is removed, and stores a long ../ path in the launcher.
+    """
+    from envxx.platforms import Platform
+    from envxx.providers.python_provider import PythonProvider
+
+    root = tmp_path / "proj"
+    project_runtime = root / ".envxx" / "runtime" / "python" / "3.10.22"
+    project_runtime.mkdir(parents=True)
+    (root / ".envxx" / store.MARKER).write_text(
+        '{"schema": 1, "layout": 2}', encoding="utf-8"
+    )
+    global_runtime = tmp_path / "home" / "runtime" / "python" / "3.10.22"
+    global_runtime.mkdir(parents=True)
+    (project_runtime / "python.exe").write_text("")
+    (global_runtime / "python.exe").write_text("")
+
+    monkeypatch.setenv(store.HOME_ENV, str(tmp_path / "home"))
+    monkeypatch.chdir(root)
+
+    exe, _ = shims._target_command(PythonProvider(Platform("windows", "x64")), "3.10.22")
+
+    assert exe.is_relative_to(tmp_path / "home")
+    assert not exe.is_relative_to(root)
+
+
+def test_require_installed_only_considers_the_global_store(home, monkeypatch):
+    seen = []
+
+    def fake_installed(tool, kind="app", scoped=False):
+        seen.append(scoped)
+        return ["3.10.22"]
+
+    monkeypatch.setattr(store, "installed_versions", fake_installed)
+    shims.require_installed(_StubProvider(), None)
+
+    assert seen == [False], "a shim must resolve against the global store"
+
+
+# -- project scope and shims -------------------------------------------------
+def test_set_path_refuses_a_project_scoped_runtime(tmp_path, monkeypatch, capsys):
+    """A shim is a PATH entry; PATH outlives the checkout it was made in."""
+    from envxx.cli import main
+
+    root = tmp_path / "proj"
+    (root / ".envxx" / "runtime" / "python" / "3.10.22").mkdir(parents=True)
+    (root / ".envxx" / store.MARKER).write_text(
+        '{"schema": 1, "layout": 2}', encoding="utf-8"
+    )
+    monkeypatch.setenv(store.HOME_ENV, str(tmp_path / "home"))
+    monkeypatch.chdir(root)
+
+    assert main(["python3.10", "set-path"]) == 1
+    printed = capsys.readouterr()
+    assert "project-scoped" in printed.err
+    assert not (tmp_path / "home" / "bin").exists()
+
+
+def test_set_path_is_hidden_for_installers(capsys):
+    """An installer has no binary, so the command cannot do anything."""
+    from envxx.cli import main
+
+    main(["git", "--help"])
+    assert "set-path" not in capsys.readouterr().out
+
+    main(["python", "--help"])
+    assert "set-path" in capsys.readouterr().out
+
+
+def test_bin_prints_the_whole_path(tmp_path, monkeypatch, capsys):
+    """A truncated path is useless: the reader is meant to copy it."""
+    from envxx.cli import main
+
+    home = tmp_path / "home"
+    exe = home / "runtime" / "python" / "3.10.22" / "python.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_text("")
+    monkeypatch.setenv(store.HOME_ENV, str(home))
+
+    folder = shims.shim_dir()
+    folder.mkdir(parents=True)
+    (folder / "python3.10.exe").write_bytes(
+        b"MZ" + b"\n@@ENVXX-TARGET@@../runtime/python/3.10.22/python.exe\n"
+    )
+
+    assert main(["bin"]) == 0
+    printed = capsys.readouterr().out
+    assert str(exe) in printed
+
+
+def test_the_reminder_names_a_way_to_refresh_without_reopening(capsys):
+    """A user who opened a new terminal and still sees nothing needs a
+    command, not a suggestion to open another one."""
+    from envxx.cli import _remind_new_shell
+
+    _remind_new_shell()
+    printed = capsys.readouterr().err
+    if os.name == "nt":
+        assert "GetEnvironmentVariable" in printed
+    else:
+        assert "source" in printed
+
+
+# -- PATH ordering -----------------------------------------------------------
+def test_set_path_prepends_by_default(tmp_path, monkeypatch):
+    """A directory the user just asked for should win over the rest of PATH."""
+    monkeypatch.setattr(envvars, "is_windows", lambda: True)
+    written = {}
+    monkeypatch.setattr(
+        envvars, "_win_write", lambda n, v, s: written.setdefault("value", v)
+    )
+    monkeypatch.setattr(envvars, "_win_broadcast", lambda: None)
+    monkeypatch.setattr(envvars, "_win_read", lambda n, s=False: r"C:\existing")
+
+    envvars.set_path(str(tmp_path / "new"))
+
+    assert written["value"].split(os.pathsep)[0].endswith("new")
+
+
+def test_set_path_append_puts_it_last(tmp_path, monkeypatch):
+    monkeypatch.setattr(envvars, "is_windows", lambda: True)
+    written = {}
+    monkeypatch.setattr(
+        envvars, "_win_write", lambda n, v, s: written.setdefault("value", v)
+    )
+    monkeypatch.setattr(envvars, "_win_broadcast", lambda: None)
+    monkeypatch.setattr(envvars, "_win_read", lambda n, s=False: r"C:\existing")
+
+    envvars.set_path(str(tmp_path / "new"), append=True)
+
+    assert written["value"].split(os.pathsep)[-1].endswith("new")
+
+
+def test_re_adding_does_not_reorder(tmp_path, monkeypatch):
+    """Running it twice must not move an entry that is already there."""
+    target = tmp_path / "mine"
+    monkeypatch.setattr(envvars, "is_windows", lambda: True)
+    monkeypatch.setattr(envvars, "_win_broadcast", lambda: None)
+    monkeypatch.setattr(
+        envvars, "_win_read", lambda n, s=False: os.pathsep.join([r"C:\a", str(target)])
+    )
+    written = {}
+    monkeypatch.setattr(
+        envvars, "_win_write", lambda n, v, s: written.setdefault("value", v)
+    )
+
+    expanded, changed = envvars.set_path(str(target))
+
+    assert changed is False
+    assert "value" not in written, "an unchanged PATH must not be rewritten"

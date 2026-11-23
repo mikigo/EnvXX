@@ -92,7 +92,15 @@ class Provider(ABC):
             return [relpath + self.platform.exe_suffix, relpath]
         return [relpath]
 
-    def entrypoint_path(self, version: str, name: str | None = None) -> Path:
+    def entrypoint_path(
+        self, version: str, name: str | None = None, *, global_only: bool = False
+    ) -> Path:
+        """Where an entry point lives inside a version directory.
+
+        'global_only' ignores a project store. A shim written into PATH must
+        point at the machine-wide install, because PATH is read from every
+        directory and a project copy disappears with its checkout.
+        """
         from .. import store
 
         entry: EntryPoint = self.spec.entrypoint(name)
@@ -100,7 +108,7 @@ class Provider(ABC):
             self.spec.name,
             version,
             kind=self.spec.kind,
-            scoped=self.spec.kind == "runtime",
+            scoped=self.spec.kind == "runtime" and not global_only,
         )
         candidates = self.entrypoint_candidates(entry.name, version)
         for relpath in candidates:

@@ -1,5 +1,9 @@
-"""Tools that ship only an installer: fetched, never unpacked or run."""
+"""Tools that ship only an installer: fetched, then offered to the user."""
 from __future__ import annotations
+
+import io
+import os
+import sys
 
 import pytest
 
@@ -230,3 +234,57 @@ def test_installer_specs_are_registered():
     for name in ("vscode", "7zip", "wechat", "wecom"):
         assert by_name[name].installer is True
         assert by_name[name].entrypoints == ()
+
+
+# -- launching the installer -------------------------------------------------
+def test_an_installer_is_opened_for_the_user(tmp_path, monkeypatch):
+    """Downloading an installer is only useful if it gets offered to run."""
+    from envxx.install import launch_installer
+
+    opened = []
+    monkeypatch.setattr(sys, "stdin", _TtyStdin())
+    monkeypatch.setattr(os, "startfile", opened.append, raising=False)
+
+    assert launch_installer(tmp_path / "a.exe", quiet=False) is True
+    assert opened == [tmp_path / "a.exe"]
+
+
+def test_a_quiet_run_never_opens_anything(tmp_path, monkeypatch):
+    from envxx.install import launch_installer
+
+    opened = []
+    monkeypatch.setattr(os, "startfile", opened.append, raising=False)
+
+    assert launch_installer(tmp_path / "a.exe", quiet=True) is False
+    assert opened == []
+
+
+def test_a_piped_run_never_opens_anything(tmp_path, monkeypatch):
+    """CI has no desktop; opening a window there would hang or fail."""
+    from envxx.install import launch_installer
+
+    opened = []
+    monkeypatch.setattr(sys, "stdin", io.StringIO())
+    monkeypatch.setattr(os, "startfile", opened.append, raising=False)
+
+    assert launch_installer(tmp_path / "a.exe", quiet=False) is False
+    assert opened == []
+
+
+def test_a_failure_to_open_is_reported_not_raised(tmp_path, monkeypatch, capsys):
+    from envxx.install import launch_installer
+
+    def boom(path):
+        raise OSError("no desktop")
+
+    monkeypatch.setattr(sys, "stdin", _TtyStdin())
+    monkeypatch.setattr(os, "startfile", boom, raising=False)
+
+    # the file is already downloaded; failing to open it is not fatal
+    assert launch_installer(tmp_path / "a.exe", quiet=False) is False
+    assert "could not open" in capsys.readouterr().err + capsys.readouterr().out
+
+
+class _TtyStdin(io.StringIO):
+    def isatty(self):
+        return True

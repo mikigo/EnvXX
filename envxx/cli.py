@@ -4,6 +4,7 @@ import errno
 import json
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -30,7 +31,44 @@ err = Console(stderr=True)
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
+PANEL_MANAGE = "Manage envxx"
+PANEL_RUNTIME = "Runtimes"
+PANEL_APP = "Portable applications"
+PANEL_INSTALLER = "Installer applications"
+
+
+class _GroupedCommands(typer.core.TyperGroup):
+    """Assign every command to a help panel by what it does.
+
+    A flat list of twenty-odd entries gives no clue which install a runtime
+    and which manage the store. Typer renders panels from the
+    'rich_help_panel' attribute, so this only has to label each command once,
+    before the help is drawn.
+    """
+
+    def list_commands(self, ctx):
+        names = super().list_commands(ctx)
+        from .providers import tool_specs
+
+        panels = {spec.name: _panel_for(spec) for spec in tool_specs()}
+        for name in names:
+            command = self.get_command(ctx, name)
+            if command is None or getattr(command, "rich_help_panel", None):
+                continue
+            command.rich_help_panel = panels.get(name, PANEL_MANAGE)
+        return names
+
+
+def _panel_for(spec: ToolSpec) -> str:
+    if spec.installer:
+        return PANEL_INSTALLER
+    if spec.kind == "runtime":
+        return PANEL_RUNTIME
+    return PANEL_APP
+
+
 app = typer.Typer(
+    cls=_GroupedCommands,
     add_completion=False,
     no_args_is_help=True,
     context_settings=CONTEXT_SETTINGS,
@@ -43,7 +81,8 @@ app = typer.Typer(
         "envxx python3.11 -m pip install requests\n"
         "envxx node22 -v\n"
         "envxx claude\n"
-        "envxx node search"
+        "envxx node search\n"
+        "envxx python3.10 set-path    # afterwards just 'python3.10'"
     ),
 )
 
@@ -294,13 +333,13 @@ def _dir_size(path: Path) -> int:
 # one of them ('python3.12 install') used to fall through to execution, so the
 # word became a script path and python died looking for a file called install.
 MANAGE_COMMANDS = (
-    "search", "list", "install", "uninstall", "update", "where", "rm", "set_path",
+    "search", "list", "install", "uninstall", "update", "where", "rm", "set-path",
 )
 
 # Of those, the ones that take a version argument. 'list' and 'search' scope
 # over every installed or published version, so a selector in front of them
 # carries no meaning and is simply dropped.
-VERSIONED_COMMANDS = ("install", "uninstall", "where", "rm", "set_path")
+VERSIONED_COMMANDS = ("install", "uninstall", "where", "rm", "set-path")
 
 
 def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
@@ -456,7 +495,9 @@ def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
         # wrapping: at 80 columns it would break the path across two lines
         typer.echo(runner.which(provider, resolved))
 
-    @group.command("set_path")
+    # an installer has no binary to point a shim at, so the command would
+    # only ever fail; hiding it keeps the help honest
+    @group.command("set-path", hidden=spec.installer)
     def set_path_shim(
         version: str | None = typer.Argument(
             None, help="version to point at (default: the newest installed)"
@@ -464,7 +505,23 @@ def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
         remove: bool = typer.Option(False, "--remove", help="delete the shim"),
     ) -> None:
         """Create a launcher in the bin directory so the tool can be called by name."""
+        if spec.installer:
+            raise UsageError(
+                f"{spec.name} is an installer; it has no command to put on PATH"
+            )
         provider = _provider(spec)
+
+        # A shim is a PATH entry, and PATH is machine-wide. A runtime that
+        # only exists inside this project would produce a command that breaks
+        # the moment the checkout is removed, so it is refused rather than
+        # silently written against the wrong store.
+        if spec.kind == "runtime" and store.project_store() is not None:
+            raise UsageError(
+                f"{spec.name} is project-scoped here; a PATH shim must point at "
+                f"a global install.\n"
+                f"run this from outside the project, or install globally with "
+                f"'envxx {spec.name} install' after setting ENVXX_HOME"
+            )
 
         if remove:
             target = version
@@ -498,7 +555,7 @@ def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
         if not on_path:
             err.print(
                 f"[dim]{folder} is not on PATH yet; "
-                f"run 'envxx set_path {folder}' to add it[/dim]"
+                f"run 'envxx set-path {folder}' to add it[/dim]"
             )
         else:
             _remind_new_shell()
@@ -508,7 +565,7 @@ def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
 def _default_label(provider: Provider, resolved: str) -> str:
     """Shim name when the user gave no version: the minor line for runtimes.
 
-    'envxx python3.10 set_path' and 'envxx python set_path' both end up with a
+    'envxx python3.10 set-path' and 'envxx python set-path' both end up with a
     label that survives the next patch release.
     """
     if provider.spec.kind != "runtime":
@@ -630,7 +687,7 @@ def init_cmd(
 # ---------------------------------------------------------------------------
 # environment variables
 # ---------------------------------------------------------------------------
-@app.command("set_env")
+@app.command("set-env")
 def set_env_cmd(
     name: str | None = typer.Argument(None, help="variable name"),
     value: str | None = typer.Argument(None, help="value to store"),
@@ -644,7 +701,7 @@ def set_env_cmd(
         _print_backups("env")
         return
     if not name:
-        raise UsageError("usage: envxx set_env NAME VALUE [--unset] [--system]")
+        raise UsageError("usage: envxx set-env NAME VALUE [--unset] [--system]")
 
     if unset:
         if dry_run:
@@ -668,22 +725,25 @@ def set_env_cmd(
     _remind_new_shell()
 
 
-@app.command("set_path")
+@app.command("set-path")
 def set_path_cmd(
     path: str | None = typer.Argument(
         None, help="directory to add (relative paths are expanded)"
     ),
     remove: bool = typer.Option(False, "--remove", help="take the directory off PATH"),
+    append: bool = typer.Option(
+        False, "--append", help="add at the end instead of the front"
+    ),
     system: bool = typer.Option(False, "--system", help="for every user (needs admin)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="print the change only"),
     list_values: bool = typer.Option(False, "--list", help="show envxx-managed paths"),
 ) -> None:
-    """Add a directory to the permanent PATH."""
+    """Put a directory on the permanent PATH, in front by default."""
     if list_values:
         _print_backups("path")
         return
     if not path:
-        raise UsageError("usage: envxx set_path PATH [--remove] [--system]")
+        raise UsageError("usage: envxx set-path PATH [--remove] [--system]")
 
     if dry_run:
         target = str(Path(path).expanduser())
@@ -694,9 +754,10 @@ def set_path_cmd(
         gone = envvars.remove_path(path, system=system)
         out.print(f"removed {path} from PATH" if gone else f"{path} is not on PATH")
     else:
-        expanded, changed = envvars.set_path(path, system=system)
+        expanded, changed = envvars.set_path(path, system=system, append=append)
         if changed:
-            out.print(f"added {expanded} to PATH")
+            position = "at the end of" if append else "to the front of"
+            out.print(f"added {expanded} {position} PATH")
         else:
             # saying "reopen your terminal" here would suggest something
             # changed when the entry was already there
@@ -706,22 +767,38 @@ def set_path_cmd(
 
 
 def _shim_target(path: Path) -> str:
-    """The executable a shim points at, made short for the table."""
+    """The executable a shim points at, as an absolute path.
+
+    The stored value is relative so the store can move; what the user needs
+    to see is the file the command will actually run.
+    """
     relative = shims.target_of(path)
     if not relative:
         return ""
-
-    resolved = (path.parent / relative).resolve()
-    try:
-        return str(resolved.relative_to(store.global_home()).as_posix())
-    except ValueError:
-        return str(resolved)
+    return str((path.parent / relative).resolve())
 
 
 def _remind_new_shell() -> None:
+    """Explain what it takes for the new value to be visible.
+
+    Windows hands every process the environment block of the process that
+    started it, and Explorer caches its own copy. A terminal opened from an
+    Explorer that has not refreshed yet therefore still sees the old PATH,
+    which reads as "the command does not exist" rather than "reopen
+    something". A command that works without reopening removes the doubt.
+    """
+    if os.name == "nt":
+        err.print(
+            "[dim]already-running terminals keep their old environment. "
+            "Open a new one, or refresh this one with:[/dim]"
+        )
+        err.print(
+            '[dim]  powershell: $env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [Environment]::GetEnvironmentVariable("Path","User")[/dim]'
+        )
+        err.print('[dim]  cmd:        refreshenv   (or just close and reopen)[/dim]')
+        return
     err.print(
-        "[dim]open a new terminal for this to take effect; "
-        "already-running ones keep their old environment[/dim]"
+        "[dim]open a new shell, or run 'source ~/.profile' in this one[/dim]"
     )
 
 
@@ -755,7 +832,7 @@ def bin_cmd() -> None:
     folder = shims.shim_dir()
 
     if not found:
-        err.print("[dim]no shims yet; 'envxx <tool> set_path' creates one[/dim]")
+        err.print("[dim]no shims yet; 'envxx <tool> set-path' creates one[/dim]")
         return
 
     # a command has one file per platform convention (bat and cmd on
@@ -764,12 +841,18 @@ def bin_cmd() -> None:
     for path in found:
         grouped.setdefault(path.stem, []).append(path)
 
-    table = Table(title="envxx bin", header_style="bold")
-    table.add_column("command")
-    table.add_column("runs")
+    # Plain lines, not a rich table: a table is laid out to the terminal
+    # width and truncates a long path, which is the one thing the reader
+    # needs whole. Two aligned columns still read fine.
+    table = Table(title="envxx bin", header_style="bold", box=None, pad_edge=False)
+    table.add_column("command", no_wrap=True)
+    table.add_column("runs", no_wrap=True)
     for name in sorted(grouped):
         table.add_row(name, _shim_target(grouped[name][0]))
-    out.print(table)
+    # a Console wider than any terminal: rich shrinks a table to the output
+    # width, and a path cut in half is exactly what the reader cannot use
+    wide = Console(width=max(200, shutil.get_terminal_size().columns))
+    wide.print(table)
 
     on_path = any(
         Path(entry).expanduser() == folder for entry in envvars.read_path().split(os.pathsep)
@@ -778,7 +861,7 @@ def bin_cmd() -> None:
     if not on_path:
         err.print(
             f"[dim]{folder} is not on PATH; "
-            f"run 'envxx set_path {folder}' to add it[/dim]"
+            f"run 'envxx set-path {folder}' to add it[/dim]"
         )
 
 

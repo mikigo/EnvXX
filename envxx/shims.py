@@ -51,10 +51,15 @@ def shim_name(tool: str, version: str) -> str:
 
 
 def _target_command(provider, version: str) -> tuple[Path, list[str]]:
-    """What the shim should exec, resolved the same way 'envxx <tool>' would."""
+    """What the shim should exec: always the global install.
+
+    A shim lives in PATH, which is a property of the machine. Resolving it
+    against a project store would make the command work only while that
+    checkout exists, and would put a long ../ path inside the launcher.
+    """
     from .run import resolve_command
 
-    return resolve_command(provider, version)
+    return resolve_command(provider, version, global_only=True)
 
 
 def _relative_target(shim: Path, exe: Path, leading: list[str]) -> str:
@@ -238,16 +243,24 @@ def existing() -> list[Path]:
 
 
 def require_installed(provider, version: str | None) -> str:
-    """Resolve which installed version a shim should point at."""
+    """Resolve which installed version a shim should point at.
+
+    Only the global store counts. A shim is a PATH entry, and PATH outlives
+    any one checkout: pointing it at a project's copy means the command stops
+    working the moment that directory is deleted, which is the opposite of
+    what a permanently installed command should do.
+    """
     from .versions import best_match, version_key
 
     installed = store.installed_versions(
-        provider.spec.name,
-        kind=provider.spec.kind,
-        scoped=provider.spec.kind == "runtime" and store.project_store() is not None,
+        provider.spec.name, kind=provider.spec.kind, scoped=False
     )
     if not installed:
-        raise UsageError(f"no {provider.spec.name} versions installed")
+        raise UsageError(
+            f"no {provider.spec.name} versions installed globally; "
+            f"run 'envxx {provider.spec.name} install' outside a project "
+            f"or with ENVXX_HOME set"
+        )
 
     resolved = best_match(installed, version) if version else max(
         installed, key=version_key

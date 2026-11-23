@@ -21,26 +21,26 @@ def _release(tag: str, assets: list[str], *, prerelease: bool = False) -> dict:
 _GIT_RELEASES = [
     # the first repackaging drops its number from the file name
     _release("v2.56.1.windows.1", [
-        "MinGit-2.56.1-64-bit.zip",
-        "MinGit-2.56.1-arm64.zip",
-        "MinGit-2.56.1-busybox-64-bit.zip",
+        "Git-2.56.1-64-bit.exe",
+        "Git-2.56.1-arm64.exe",
+        "Git-2.56.1-64-bit.exe",
         "PortableGit-2.56.1-64-bit.7z.exe",
         "Git-2.56.1-64-bit.exe",
     ]),
     # later repackagings fold the number into the version
     _release("v2.56.0.windows.4", [
-        "MinGit-2.56.0.4-64-bit.zip",
-        "MinGit-2.56.0.4-arm64.zip",
+        "Git-2.56.0.4-64-bit.exe",
+        "Git-2.56.0.4-arm64.exe",
     ]),
     _release("v2.56.0.windows.1", [
-        "MinGit-2.56.0-64-bit.zip",
-        "MinGit-2.56.0-arm64.zip",
+        "Git-2.56.0-64-bit.exe",
+        "Git-2.56.0-arm64.exe",
     ]),
     _release("v2.55.0.windows.2", [
-        "MinGit-2.55.0.2-64-bit.zip",
+        "Git-2.55.0.2-64-bit.exe",
     ]),
     _release("v2.57.0-rc0.windows.1", [
-        "MinGit-2.57.0-rc0-64-bit.zip",
+        "Git-2.57.0-rc0-64-bit.exe",
     ], prerelease=True),
 ]
 
@@ -82,17 +82,17 @@ def test_a_query_matches_every_repackaging_of_that_version():
 def test_the_first_repackaging_ships_the_bare_version():
     # v2.56.0.windows.1 -> Git-2.56.0-64-bit.exe
     provider = GitProvider(Platform("windows", "x64"))
-    assert provider._asset_name("2.56.0.windows.1") == "MinGit-2.56.0-64-bit.zip"
+    assert provider._asset_name("2.56.0.windows.1") == "Git-2.56.0-64-bit.exe"
 
 
 def test_later_repackagings_fold_their_number_in():
     provider = GitProvider(Platform("windows", "x64"))
-    assert provider._asset_name("2.56.0.windows.4") == "MinGit-2.56.0.4-64-bit.zip"
+    assert provider._asset_name("2.56.0.windows.4") == "Git-2.56.0.4-64-bit.exe"
 
 
 def test_arm64_uses_its_own_installer():
     provider = GitProvider(Platform("windows", "arm64"))
-    assert provider._asset_name("2.56.1.windows.1") == "MinGit-2.56.1-arm64.zip"
+    assert provider._asset_name("2.56.1.windows.1") == "Git-2.56.1-arm64.exe"
 
 
 # -- catalogue ---------------------------------------------------------------
@@ -120,34 +120,25 @@ def test_git_display_collapses_repackagings(win, monkeypatch):
 
 def test_git_filters_by_asset_for_the_arch(win, monkeypatch):
     # an x64 machine must not be offered a build with only an arm64 installer
-    arm_only = _release("v2.58.0.windows.1", ["MinGit-2.58.0-arm64.zip"])
+    arm_only = _release("v2.58.0.windows.1", ["Git-2.58.0-arm64.exe"])
     provider = _git(win, monkeypatch, [arm_only, *_GIT_RELEASES])
     assert "2.58.0.windows.1" not in [i.version for i in provider.search()]
 
 
-def test_git_plan_points_at_the_mingit_zip(win, monkeypatch):
+def test_git_plan_points_at_the_installer(win, monkeypatch):
     plan = _git(win, monkeypatch).plan("2.56.0.windows.4")
-    assert plan.asset.filename == "MinGit-2.56.0.4-64-bit.zip"
-    assert plan.asset.url.endswith(
-        "/v2.56.0.windows.4/MinGit-2.56.0.4-64-bit.zip"
-    )
-    assert plan.asset.format == "zip"
-    # MinGit unpacks flat, so the root stays the root
-    assert plan.strip_top is False
-    assert plan.download_only is False
+    assert plan.asset.filename == "Git-2.56.0.4-64-bit.exe"
+    assert plan.asset.url.endswith("/v2.56.0.windows.4/Git-2.56.0.4-64-bit.exe")
+    assert plan.asset.format == "exe"
+    # an installer is downloaded and handed to the user, never unpacked
+    assert plan.download_only is True
 
 
-def test_git_is_a_portable_zip_not_an_installer():
-    # MinGit is a plain zip, so git is unpacked and runnable, not downloaded
-    # as an installer for the user to open
-    assert GitProvider.spec.installer is False
-    assert [e.name for e in GitProvider.spec.entrypoints] == ["git", "scalar"]
-
-
-def test_git_entrypoint_is_the_cmd_launcher(win):
-    provider = GitProvider(win)
-    # cmd/git.exe is what Git for Windows puts on PATH
-    assert provider.entrypoint_candidates("git") == ["cmd/git.exe", "cmd/git"]
+def test_git_is_an_installer():
+    # the official installer is what the project's download page offers, and
+    # it sets up shell integration in the way upstream intends
+    assert GitProvider.spec.installer is True
+    assert GitProvider.spec.entrypoints == ()
 
 
 @pytest.mark.parametrize("plat", ["linux", "macos"])

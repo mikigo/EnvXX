@@ -649,3 +649,48 @@ def test_the_workflow_checks_the_tag_against_the_version():
     assert "envxx.__version__" in workflow
     # the check has to run on tag pushes only; a manual run has no tag to compare
     assert "startsWith(github.ref, 'refs/tags/')" in workflow
+
+
+# -- help grouping -----------------------------------------------------------
+def test_help_splits_commands_into_panels(capsys):
+    """A flat list of twenty tools hides which ones install a runtime."""
+    from envxx.cli import (
+        PANEL_APP,
+        PANEL_INSTALLER,
+        PANEL_MANAGE,
+        PANEL_RUNTIME,
+    )
+
+    main(["--help"])
+    printed = capsys.readouterr().out
+
+    for panel in (PANEL_MANAGE, PANEL_RUNTIME, PANEL_APP, PANEL_INSTALLER):
+        assert panel in printed, f"missing panel: {panel}"
+
+
+def test_each_tool_lands_in_the_panel_matching_its_kind():
+    from envxx.cli import (
+        PANEL_APP,
+        PANEL_INSTALLER,
+        PANEL_RUNTIME,
+        _panel_for,
+    )
+    from envxx.providers import tool_specs
+
+    panels = {spec.name: _panel_for(spec) for spec in tool_specs()}
+
+    # runtimes and the two application shapes must not share a panel
+    assert panels["python"] == PANEL_RUNTIME
+    assert panels["node"] == PANEL_RUNTIME
+    assert panels["claude"] == PANEL_APP
+    assert panels["git"] == PANEL_INSTALLER
+    assert panels["vscode"] == PANEL_INSTALLER
+
+
+def test_manage_commands_are_not_listed_as_tools():
+    """init, set_env and the rest belong to envxx, not to any provider."""
+    from envxx.providers import tool_specs
+
+    names = {spec.name for spec in tool_specs()}
+    for command in ("init", "set-env", "set-path", "bin"):
+        assert command not in names

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 from rich.console import Console
@@ -155,7 +158,38 @@ def _fetch_installer(provider: Provider, plan, *, quiet: bool) -> Path:
         # the absolute path, not the store-relative one: this is meant to be
         # opened in a file manager or pasted into a shell
         console.print(f"[green]downloaded[/green] {dest}")
+
+    launch_installer(dest, quiet=quiet)
     return dest
+
+
+def launch_installer(path: Path, *, quiet: bool) -> bool:
+    """Hand the downloaded installer to the desktop so the user can run it.
+
+    Opening it is the point of downloading an installer, but it must never
+    happen silently in a script: the runner waits for a click, which would
+    hang CI. A non-interactive run therefore only prints where the file is.
+
+    Returns whether it was opened.
+    """
+    if quiet or not sys.stdin.isatty():
+        return False
+
+    try:
+        if os.name == "nt":
+            os.startfile(path)  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(path)])
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
+    except OSError as exc:
+        console.print(f"[yellow]could not open the installer:[/yellow] {exc}")
+        return False
+
+    console.print(
+        "[dim]the installer window is open; finish or close it when ready[/dim]"
+    )
+    return True
 
 
 def _is_complete(provider: Provider, version: str, target: Path) -> bool:

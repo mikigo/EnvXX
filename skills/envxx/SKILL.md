@@ -108,17 +108,41 @@ Python 的版本目录来自 Astral 的官方索引，覆盖 3.8 到 3.16 的全
 
 ### 只下载安装包的工具
 
-`vscode`、`7zip`、`wechat`、`wecom` 是另一类：官方只发安装程序，没有绿色版。
+`vscode`、`git`、`7zip`、`wechat`、`wecom` 是另一类：官方只发安装程序，没有绿色版。
 
-`envxx wechat install` **只下载，不安装**。文件落在 `downloads/`，命令会打印绝对路径，用户自己双击。不要告诉用户这几个工具"装好了"，也不要建议用 `envxx wechat` 直接运行——它们没有可运行的入口。
+`envxx wechat install` **下载后会自动打开安装程序**，装不装由用户点。文件落在 `downloads/`，命令先打印绝对路径。
+
+脚本或 CI 里（stdio 不是终端）不会弹窗口，只打印路径，否则会卡住等人点。
+
+不要告诉用户这几个工具"装好了"，也不要建议用 `envxx wechat` 直接运行——它们没有可运行的入口。
 
 - `list` 显示已下载的安装包，`where` 给出文件路径。
 - 没下载过时 `where` 会报错并提示先 `install`。
-- 微信和企业微信的目录只有当前版本，`search` 只有一行；VS Code 和 7-Zip 能列历史。
+- 微信和企业微信的目录只有当前版本，`search` 只有一行；VS Code、Git 和 7-Zip 能列历史。
 - Git 的版本号带重打包序号（`2.56.0.windows.4`），这是标识的一部分，不要截短成 `2.56.0` 去查。
 - 这类工具不占 `tools/`，删 `downloads/` 里的文件就能清掉。
 
-`git` 不在这一类。它用的是 MinGit zip，解包后是绿色版，`envxx git2.56 version` 能直接运行。Windows 上的 Git 有三种发布形式（安装器、PortableGit 自解压 exe、MinGit zip），只有最后一个是普通压缩包。
+
+### 让工具直接可调用
+
+```bash
+envxx python3.10 set-path      # 生成 ~/.envxx/bin/python3.10.exe
+envxx set-path ~/.envxx/bin    # 把这个目录放到 PATH 最前
+envxx bin                      # 列出已生成的命令
+```
+
+之后 `python3.10 script.py` 直接可用，不用每次加 envxx 前缀。
+
+- `set-path` 默认**前置**，新加的目录才有机会生效；`--append` 放末尾。
+- 已存在的条目不重排，重复执行是幂等的。
+- shim 永远指向**全局** store：PATH 是机器级的，指向项目会在项目删除后失效。项目内对 runtime 执行 `set-path` 会报错，这是有意的。
+- `set-path --remove` 删除 shim 或从 PATH 摘除目录。
+
+### 环境变量
+
+`envxx set-env NAME VALUE` 写用户级环境变量（Windows 注册表、POSIX shell rc），`--unset` 删除，`--list` 查看。`PATH` 会被拒绝，必须用 `set-path` 以免整条覆盖。
+
+写入后**已开的终端不会自动生效**，这是操作系统机制。提示里会给出立即刷新的命令。
 
 ### Store 位置
 

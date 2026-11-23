@@ -44,6 +44,8 @@ def resolve_command(
     provider: Provider,
     version: str,
     entrypoint: str | None = None,
+    *,
+    global_only: bool = False,
 ) -> tuple[Path, list[str]]:
     """Return (executable, leading args) for an entrypoint.
 
@@ -51,18 +53,23 @@ def resolve_command(
     in the version dir ('pip install -e .' then 'envxx python3.11 envxx'),
     then '<default launcher> -m <module>' when the tool ships no launcher file
     at all (pip in python-build-standalone install_only archives).
+
+    'global_only' skips a project store; a shim needs that because PATH
+    outlives any one checkout.
     """
     name = entrypoint or provider.spec.default_entrypoint
 
     if provider.spec.declared_entrypoint(name) is not None:
-        exe = provider.entrypoint_path(version, name)
+        exe = provider.entrypoint_path(version, name, global_only=global_only)
         if exe.exists():
             return exe, []
 
         fallback = provider.module_fallback(name)
         if fallback:
             launcher_name, module = fallback
-            launcher = provider.entrypoint_path(version, launcher_name)
+            launcher = provider.entrypoint_path(
+                version, launcher_name, global_only=global_only
+            )
             if launcher.exists():
                 return launcher, ["-m", module]
 

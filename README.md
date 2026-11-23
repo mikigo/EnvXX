@@ -1,10 +1,10 @@
 # EnvXX
 
-我习惯让电脑保持干净。除了系统自带的东西，能不装就不装。要用 Python，就解压一个免安装版；要用 Node，也一样。没有安装向导，没有注册表垃圾，也没见过卸载后还剩 300MB 的目录。
+[![release](https://img.shields.io/github/v/release/mikigo/EnvXX?include_prereleases&sort=semver)](https://github.com/mikigo/EnvXX/releases)
+[![license](https://img.shields.io/github/license/mikigo/EnvXX)](LICENSE)
+[![python](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
 
-这套习惯有个代价：换一台电脑，一切从头来。翻下载页、认准架构、解压、配 PATH，一个个弄。我换过几次机器，每次都在做同样的事，索性写成工具。
-
-EnvXX 只干一件事：把官方发布的绿色版下到 `~/.envxx`，然后按需调用。想清干净，删掉这个目录就够了。
+跨 Windows、Linux、macOS 的免安装运行时管理器。把官方发布的绿色版下载到同一个目录，按需调用，删掉目录就等于卸载。
 
 ```bash
 envxx python3.11 -m pip install requests
@@ -13,11 +13,23 @@ envxx go1.27 version
 envxx claude
 ```
 
-## 安装 EnvXX 自己
+没有安装向导，不写注册表，卸载后不留残留目录。
 
-从 [Releases](https://github.com/mikigo/EnvXX/releases/latest) 下载对应平台的 zip，解压后是一个同名目录，里面就是单文件二进制，不用装 Python：
+## 为什么做这个
 
-| 系统 | 压缩包 | 解压后 |
+配一台新机器意味着一件事：下载 Python、Node、Go 和 JDK，每个都认准架构，解压到某个地方，再把 PATH 配好。换下一台机器，同样的活再来一遍。
+
+EnvXX 把这件事做一次，产物放在 `~/.envxx`。每个工具都是上游官方构建，没有二次打包；每个版本独占一个目录，多个版本可以并存。
+
+```bash
+rm -rf ~/.envxx   # 卸载完成
+```
+
+## 安装
+
+从 [Releases](https://github.com/mikigo/EnvXX/releases/latest) 下载对应平台的压缩包，解压后把二进制放进 PATH。
+
+| 系统 | 压缩包 | 二进制 |
 | --- | --- | --- |
 | Windows x64 | `<版本>-windows-x64.zip` | `<版本>-windows-x64/envxx.exe` |
 | Windows arm64 | `<版本>-windows-arm64.zip` | `<版本>-windows-arm64/envxx.exe` |
@@ -26,58 +38,91 @@ envxx claude
 | macOS Apple Silicon | `<版本>-macos-arm64.zip` | `<版本>-macos-arm64/envxx` |
 | macOS Intel | `<版本>-macos-x64.zip` | `<版本>-macos-x64/envxx` |
 
-## 现在支持
+`<版本>` 是 tag 去掉 `v`：tag `v1.8.0` 对应 `1.8.0-linux-x64.zip`。文件名带版本，所以 `releases/latest/download/...` 这种固定路径用不了，得先问 API：
+
+```bash
+version=$(curl -s https://api.github.com/repos/mikigo/EnvXX/releases/latest \
+  | grep -o '"tag_name": *"v[^"]*"' | cut -d'"' -f4); version=${version#v}
+curl -L -o envxx.zip "https://github.com/mikigo/EnvXX/releases/latest/download/${version}-linux-x64.zip"
+unzip envxx.zip
+chmod +x "${version}-linux-x64/envxx" && sudo mv "${version}-linux-x64/envxx" /usr/local/bin/
+```
+
+二进制是自包含的：typer、rich、httpx 都打在里面，目标机器不需要装 Python。
+
+从源码安装：
+
+```bash
+pip install -e .
+```
+
+## 快速上手
+
+```bash
+envxx python3.11 -m pip install requests   # 本地没有 3.11 会先下载
+envxx node22 -v
+envxx go1.27 version
+envxx jdk21 --version
+```
+
+工具名和版本连在一起写：`python3.11`、`node22`、`go1.27`、`jdk21`。别名也认：`golang1.27`、`java21`、`temurin21`、`nodejs22`。
+
+## 支持的工具
+
+### 运行时
+
+多个版本可以并存，`python3.11` 和 `python3.12` 各占一个目录。
 
 | 工具 | 版本写法 | 入口 | 来源 |
 | --- | --- | --- | --- |
 | Python | `python3.11`、`python3.11.9` | `python`、`pip` | python-build-standalone |
 | Node.js | `node22`、`node22.14.0` | `node`、`npm`、`npx` | nodejs.org LTS |
 | Go | `go1.27`、`go1.27.4` | `go`、`gofmt` | go.dev |
-| JDK | `jdk21`、`java21` | `java`、`javac`、`jar` | Adoptium 的 Temurin |
-| Claude Code | `claude` | `claude` | Open VSX 上的 VSIX |
-| opencode | `opencode` | `opencode` | GitHub Release 压缩包 |
-| CC Switch | `cc-switch` | `cc-switch` | GitHub Release 便携版 |
-| MobaXterm | `xterm` | `xterm` | mobatek.net 便携版 |
-| Windows Terminal | `wt` | `wt`、`WindowsTerminal` | GitHub Release 便携版 |
-| Notepad-- | `notepad--`、`ndd` | `notepad--` | GitHub Release 便携版 |
-| MarkText | `marktext`、`mt` | `marktext` | GitHub Release 便携版 |
-| DBeaver | `dbeaver` | `dbeaver` | GitHub Release 便携版 |
-| Git for Windows | `git` | `git`、`scalar` | GitHub Release 便携版 |
-| dufs | `dufs` | `dufs` | GitHub Release 压缩包 |
+| JDK | `jdk21`、`java21` | `java`、`javac`、`jar` | Adoptium Temurin |
 
-另外几个只下载安装包、不代你安装的：
+### 便携应用
+
+解包即用，留最新版就够。
+
+| 工具 | 版本写法 | 入口 | 来源 |
+| --- | --- | --- | --- |
+| Claude Code | `claude` | `claude` | Open VSX |
+| opencode | `opencode` | `opencode` | GitHub Release |
+| CC Switch | `cc-switch` | `cc-switch` | GitHub Release |
+| MobaXterm | `xterm` | `xterm` | mobatek.net |
+| Windows Terminal | `wt` | `wt`、`WindowsTerminal` | GitHub Release |
+| Notepad-- | `notepad--3.9`、`ndd3.9` | `notepad--` | GitHub Release |
+| MarkText | `marktext0.23`、`mt0.23` | `marktext` | GitHub Release |
+| DBeaver | `dbeaver` | `dbeaver` | GitHub Release |
+| dufs | `dufs` | `dufs` | GitHub Release |
+
+### 安装器应用
+
+只下载并打开安装程序，装不装由你决定。EnvXX 不代劳，因为这类软件会往 Program Files 里写东西，做不到"删目录即卸载"。
 
 | 工具 | 版本写法 | 来源 |
 | --- | --- | --- |
+| Git for Windows | `git` | git-scm.com |
 | VS Code | `vscode`、`code` | update.code.visualstudio.com |
 | 7-Zip | `7zip`、`7z` | 7-zip.org |
 | 微信 | `wechat`、`weixin` | pc.weixin.qq.com |
 | 企业微信 | `wecom`、`wechatwork` | work.weixin.qq.com |
 
-Python、Node、Go、JDK 属于运行时，多个版本可以并存：`python3.11` 和 `python3.12` 各占一个目录，互不干扰。后面几个是应用，留最新版就够。
+## 用法
 
-JDK 只列 17 以上的 LTS 线加上最新的特性版本，Adoptium 还在发的 Java 8、11 不会出现在 `search` 里；`jdk` 的默认版本是最新的那个，要 LTS 就写 `jdk21`。macOS 上的包是 bundle 布局，入口在 `Contents/Home/bin/java`，EnvXX 自己会找对位置。Go 的发布候选会标成 prerelease，`install` 不带版本号时不会挑到它们。
-
-版本多的运行时（Go、JDK、Node）默认每个版本线只显示最新一个补丁版，比如 Go 显示 `1.27.4` 而不是 1.27 线的全部；`search --all` 才是完整列表。
-
-Python 走的是 Astral 的官方索引（`releases.astral.sh` 的 NDJSON，uv 用的也是这个源），一次请求拿到全部 500 多个构建，从 3.8 到 3.16 都在内。这比翻 GitHub release 靠谱：python-build-standalone 的最新 release 只打包还在维护的版本线，3.8/3.9/3.10 早就不在里面了，用 GitHub API 找它们得翻很多页而且不一定翻得到。索引 20MB，缓存一天，第一次用会慢一些。索引里每个构建都带 sha256，下载会校验。
-
-加新工具不用动命令行解析。写一个 provider，登记进注册表就行。ripgrep、fd、fzf 这些单文件工具都在候选名单里，只是我还没用到。
-
-## 命令
+### 管理版本
 
 ```bash
-envxx init                     # 在当前目录建项目级 .envxx
-envxx <tool> search            # 看远端有哪些版本
-envxx <tool> search --all      # 看完整版本历史
-envxx <tool> list              # 看本地已经下了哪些
+envxx <tool> search            # 远端有哪些版本
+envxx <tool> search --all      # 完整历史（默认每个版本线只显示最新补丁）
+envxx <tool> list              # 本地已下载
 envxx <tool> install 3.11.9    # 只下载不运行
 envxx <tool> update            # 升到最新（应用类）
-envxx <tool> where             # 打印入口的绝对路径
+envxx <tool> where             # 入口的绝对路径
 envxx <tool> uninstall 3.11.18 # 删除某个版本（应用类可简写 rm）
 ```
 
-版本号可以直接跟在工具名后面，管理命令跟在后面也行：
+版本号也可以直接跟在工具名后面：
 
 ```bash
 envxx python3.12 install       # 等同 envxx python install 3.12
@@ -85,13 +130,28 @@ envxx python3.12 where         # 等同 envxx python where 3.12
 envxx python3.12 list          # 版本无意义，等同 envxx python list
 ```
 
-`search` 默认只列近期版本：应用的列表取最新 10 条，多出来的会提示用 `--all`。所有列表（`search`、`search --all`、`list`）都是新版本在前。`--all` 到底有多全取决于工具——opencode 会去翻完整的 tag 历史，其余几个本来就是全量。
+所有列表都是新版本在前。`search` 每个版本线只显示最新补丁，`--all` 才是全部。
 
-`envxx python3.11` 这种写法，本地没有 3.11 时会自动拉最新补丁版再执行，不用先 install。
+### 运行工具
 
-想直接跑应用，写名字就行：`envxx claude`。带上参数也一样：`envxx node -v` 会真的调用 node。裸的 `envxx node` 走的是子命令帮助，不会去执行。
+没装的版本会在第一次调用时自动下载：
 
-要给同一个工具指定别的入口，直接写入口名就行。Python 带 `pip`，Node 带 `npm`、`npx`，Go 带 `gofmt`：
+```bash
+envxx python3.11 script.py     # 需要时先装 3.11，再执行
+```
+
+应用直接写名字：
+
+```bash
+envxx claude
+envxx node -v                  # 参数会真的传给 node
+```
+
+裸的工具名（`envxx node`）显示子命令帮助，不会执行。
+
+### 其他入口
+
+Python 带 `pip`，Node 带 `npm`、`npx`，Go 带 `gofmt`：
 
 ```bash
 envxx python3.11 pip install requests
@@ -100,140 +160,193 @@ envxx node22 npx create-vite
 envxx go1.27 gofmt -l .
 ```
 
-JDK 的默认入口就是 `java`，直接跟参数即可，不要重复写入口名：
+默认入口不需要重复写。JDK 的默认入口是 `java`，所以 `envxx jdk21 --version` 是对的，`envxx jdk21 java --version` 不是。
+
+`envxx run` 是脚本里拼命令用的等价写法：
 
 ```bash
-envxx jdk21 --version          # 对
-envxx jdk21 javac -version     # 需要另一个入口时才写
+envxx run python@3.11:pip --version
+envxx run node@22:npm --version
 ```
 
-## 存储位置
+### 不用每次写 envxx
 
-所有东西默认在 `~/.envxx`，按工具类型分两个目录：
-
-```
-~/.envxx/
-├── runtime/      运行时：python、node、go、jdk
-├── app/          应用：claude、dufs、git、vscode……
-├── downloads/    下载缓存，断点续传就靠它，跨项目共用
-├── cache/        远端版本列表等 JSON，默认存一天
-└── .locks/       并发安装时的锁
+```bash
+envxx python3.10 set-path      # 生成 ~/.envxx/bin/python3.10.exe
+envxx set-path ~/.envxx/bin    # 把这个目录放进 PATH
 ```
 
-`ENVXX_HOME` 可以改位置。
+之后新开的终端里直接 `python3.10 script.py`。`envxx bin` 列出已生成的所有命令。
 
-### 每个项目一套运行时
+目录默认加在**最前面**，刚加进去的应该优先；放末尾用 `--append`。已经存在的条目不动，重复执行是幂等的。
 
-项目里需要固定版本的运行时，又不希望污染全局的话：
+启动器永远指向全局 store。PATH 是机器级的，指向项目里的副本会在项目删除后失效，所以项目内执行 `set-path` 会直接报错。`--remove` 用来删除。
+
+### 环境变量
+
+```bash
+envxx set-env FOO bar          # 用户级：Windows 写注册表，其他平台写 shell rc
+envxx set-env FOO --unset      # 删除
+envxx set-env --list           # 看 envxx 设过哪些
+```
+
+`PATH` 会被拒绝——整条替换会丢掉其他所有条目，请用 `set-path`。每次写入前旧值备份到 `~/.envxx/.backup/`。
+
+改动对新终端生效，已开的终端保留旧环境；命令会打印免重开的刷新方法。
+
+### 项目级运行时
 
 ```bash
 cd my-project
 envxx init
 ```
 
-会在当前目录建 `.envxx/runtime/`，并把 `.envxx/` 追加进 `.gitignore`。之后在这个目录（以及它的任何子目录）里跑 `envxx python3.11`，用的是项目内那一份。
+在当前目录建 `.envxx/runtime/`，并把 `.envxx/` 追加进 `.gitignore`。从这个目录及其子目录运行 `envxx python3.11`，用的都是项目内那一份。
 
-**只有运行时走项目级。** 应用（claude、git、vscode 这些）永远是机器级的，装到一个版本就够了，没有理由每个仓库一份：
+只有运行时能项目级。应用是机器级的——没有理由每个仓库带一份自己的文本编辑器。
 
 ```
 my-project/.envxx/
-├── runtime/      只有运行时
+├── runtime/
 └── .project
 ```
 
-`downloads/` 和 `cache/` 也不进项目目录：同一个 CPython 包 20MB，两个仓库各下一遍没有意义。项目里装 python 时，包从全局 `downloads/` 取，解压到项目 `runtime/`。
+`downloads/` 和 `cache/` 也不进项目目录：同一个 20 MB 的 CPython 包不该每个仓库下一遍。
 
-判断顺序是：`ENVXX_HOME` → 从当前目录向上找到的 `.envxx`（仅运行时） → `~/.envxx`。
+查找顺序：`ENVXX_HOME` → 向上找到的 `.envxx`（仅运行时）→ `~/.envxx`。`ENVXX_HOME` 排最前是因为它每次调用都显式指定；CI 里设了它就不会被仓库里的 `.envxx` 带偏。
 
-`ENVXX_HOME` 排在最前面是故意的：它是每次调用显式指定的，CI 里设了它就不会因为仓库里恰好有个 `.envxx` 而换地方，也不会去找项目 store。
+只有带 `.project` 标记的目录才算项目 store，一个碰巧叫 `.envxx` 的目录会被忽略。`envxx init` 发现目录不是它建的会报错退出，不会覆盖。
 
-向上查找只认带 `.project` 标记文件的目录，所以一个碰巧叫 `.envxx` 的目录不会被误当成 store。`envxx init` 发现已有目录但不是它建的，会报错退出，不会覆盖。
+`runtime/` 里放的是可执行文件。`init` 写 `.gitignore` 是为了防止误提交，但挡不住刻意提交二进制的仓库——在 clone 下来的项目里跑 `envxx` 之前，先看一眼 `.envxx/` 里有什么。
 
-`runtime/` 里放的是可执行文件。`init` 自动写 `.gitignore` 是为了挡住误提交，但挡不住一个本来就带着工具二进制的仓库——clone 别人的项目后就地跑 `envxx` 之前，先看一眼 `.envxx/` 里有什么。
+老版本用平铺的 `tools/` 目录，第一次运行新版本时自动迁移：运行时进 `runtime/`，应用进 `app/`。
 
-老版本的 store 用 `tools/` 平铺，第一次运行新版本时会自动迁移：运行时进 `runtime/`，应用进 `app/`，项目 store 里的应用会被搬到全局。
+## 存储
 
-## 只下载安装包的工具
+```
+~/.envxx/
+├── runtime/      python、node、go、jdk
+├── app/          claude、dufs、git、vscode……
+├── downloads/    下载缓存，支持断点续传，跨项目共用
+├── cache/        远端版本列表，缓存一天
+└── .locks/       并发安装时的锁
+```
 
-有些软件官方只提供安装程序，没有绿色版。这类工具 EnvXX 只负责下载，不代你安装，也不声称删目录就能卸载：
+`ENVXX_HOME` 可以改位置。
+
+## 行为说明
+
+### Python
+
+版本目录来自 Astral 的官方索引（`releases.astral.sh`，uv 用的也是这个源）。一次请求返回全部 500 多个构建，从 3.8 到 3.16——GitHub release API 只列还在维护的版本线，3.8/3.9/3.10 在那里查不到。索引 20 MB，缓存一天。每个构建都带 sha256，下载时校验。
+
+### JDK
+
+只列 17 以上的 LTS 线加上最新特性版本；Adoptium 还在发 Java 8 和 11，但默认摆出来只是噪音。默认版本是最新那个，要 LTS 得写 `jdk21`。macOS 上的包是 bundle，入口在 `Contents/Home/bin/java`，EnvXX 会自己找对。
+
+### 版本显示
+
+版本多的工具（Go、JDK、Node）默认每个版本线只显示一行——`1.27.4` 而不是 1.27 的每个补丁。`search --all` 列出全部。
+
+### Git for Windows
+
+用官方安装器（`Git-*.exe`），和下载页一致。安装器会配好 shell 集成和凭据管理器，那是安装器自己的决定，不是 EnvXX 的。
+
+版本号带重打包序号——`2.56.0.windows.1` 到 `.4` 是同一个上游版本的四个不同构建，所以保留完整 tag。`search` 每个上游版本只显示最新一次重打包，`--all` 全部列出。
+
+### 安装器应用
 
 ```bash
 envxx wechat install
 ```
 
-它会把 `WeChatWin_4.2.0.exe` 下到 store 的 `downloads/` 里，然后把绝对路径打印出来，你双击自己装。
+下载到 `downloads/`，打印绝对路径，然后打开安装程序。装不装、怎么装都是你的事。关掉窗口不会丢什么——文件还在，随时能再打开。
 
-```bash
-envxx 7zip list      # 已经下过哪些安装包
-envxx 7zip where     # 安装包放在哪
-```
+stdio 不是终端时（脚本、CI）不会弹窗，只打印路径，否则流水线会卡在那里等人点。
 
-注意几点：
+`list` 报告的是 `downloads/` 里有什么，不是解包内容，因为这类工具根本不会创建 `runtime/` 或 `app/` 条目。`where` 打印安装包路径。重复 `install` 不会重新下载。
 
-- `list` 列的是 `downloads/` 里的安装包，不是 `tools/` 里的解包版本——这类工具根本不会在 `tools/` 下建目录。
-- `where` 在还没下载时会提示先 `install`。
-- 重复 `install` 不会重新下载，文件已经在就跳过。这类工具没有多版本并存的概念，`downloads/` 里同名文件只会有最新那一份。
+微信和企业微信没有版本历史——页面上只挂当前这一版，所以 `search` 只有一行。VS Code 和 7-Zip 能列版本。
 
-微信和企业微信没有可查的历史版本，页面上只挂当前这一版，所以 `search` 只有一行。VS Code 和 7-Zip 能列出全部版本或当前构建。VS Code 在 Windows 上给的是 user 安装包（不需要管理员权限），macOS 给的是 zip。
+### pip 安装的控制台脚本
 
-Git for Windows 用的是 MinGit（`MinGit-*.zip`），不是安装器也不是 PortableGit。后两者一个要跑安装向导、一个是自解压 exe，只有 MinGit 是普通 zip，解开就能用。它是精简构建，没有 GUI 和 Perl，但 `git` 本身是完整的。压缩包是平铺的，`cmd/`、`usr/`、`ucrt64/` 直接在根，入口是 `cmd/git.exe`。
-
-它的版本号带重打包序号，比如 `2.56.0.windows.4`。这不是噪音：`2.56.0` 被重新打包过四次，`v2.56.0.windows.1` 到 `.4` 是四个不同的构建，所以版本号保留完整形式。`search` 默认每个上游版本只显示最新一次重打包，`--all` 才列出全部。装的时候也注意文件名的规律：`v2.56.0.windows.1` 对应 `MinGit-2.56.0-64-bit.zip`（第一次重打包不带序号），而 `.4` 对应 `MinGit-2.56.0.4-64-bit.zip`。
-
-## 用 pip 装进去的东西
-
-`pip install` 装到某个 Python 里的控制台脚本，可以按名字直接跑。前提是它确实在那个 Python 的 `Scripts/`（Unix 上是 `bin/`）里：
+装进运行时 `Scripts/`（或 `bin/`）的脚本可以按名字调用：
 
 ```bash
 envxx python3.11 pip install black
-envxx python3.11 black .        # 找到 Scripts/black.exe
+envxx python3.11 black .
 ```
 
-名字找不到时不会被吞掉，仍然按普通参数交给默认入口，所以 `envxx python3.11 script.py` 行为不变。这也意味着如果你在当前目录有个和参数同名的可执行文件或包，Python 会按自己的规则处理它。
+找不到的名字会当作普通参数透传，所以 `envxx python3.11 script.py` 行为不变。
 
-## 几个工具的细节
+## 配置
 
-国内网络慢的话留了镜像变量：
+### 镜像
 
-- `ENVXX_GITHUB_MIRROR`：GitHub 网页和 Release 下载
-- `ENVXX_GITHUB_API`：GitHub API
-- `ENVXX_GITHUB_RAW`：raw.githubusercontent.com
-- `ENVXX_NODE_DIST`：nodejs.org
-- `ENVXX_CCSWITCH_MIRROR`：CC Switch 自己的 CDN，默认指向 `dl.ccswitch.io`
+网络慢可以指向镜像：
 
-Go 走 `dl.google.com`，JDK 走 Adoptium 的 API，两个都是直连，不在镜像变量覆盖的范围内。
+| 变量 | 覆盖范围 |
+| --- | --- |
+| `ENVXX_GITHUB_MIRROR` | github.com 页面和 Release 下载 |
+| `ENVXX_GITHUB_API` | api.github.com |
+| `ENVXX_GITHUB_RAW` | raw.githubusercontent.com |
+| `ENVXX_NODE_DIST` | nodejs.org/dist |
+| `ENVXX_CCSWITCH_MIRROR` | CC Switch 自己的 CDN，默认 `dl.ccswitch.io` |
 
-关于 CC Switch：官方 CDN 只放了 v4.0.29 之后的文件。老版本还是从 GitHub 取，所以下载先试镜像，404 再回落。版本列表走的是 GitHub 的 tags 接口，四十多 KB 一页，比 releases 接口的几 MB 轻得多。
+Go 从 `dl.google.com` 下载，JDK 走 Adoptium 的 API，两者都不在镜像变量覆盖范围内。
 
-MobaXterm 没有 API，下载地址里那段数字是构建号，从版本号推不出来。`xterm` 的版本列表是抓官网下载页拿的。它的 changelog 有完整历史和日期，但只给最新两个稳定版挂下载链接，旧版本在列表里标成 `archived`，指定安装会直接报错，不会给你一个死链。另外它只有 Windows 版，其他平台会明确拒绝。
+### 限流
 
-Windows Terminal 走 `microsoft/terminal` 的 releases，只收稳定版：预览版靠 `prerelease` 标记和资产名里的 `WindowsTerminalPreview` 双重过滤，所以 `1.26.x` 这种只在预览通道有的一律不出现。它的版本号是四段（`1.25.3131.0`），`wt` 只给 Windows。装好之后有两个入口：`wt` 是命令行前端（分屏、开新标签），`WindowsTerminal` 是 GUI 本体。
+GitHub API 未登录每小时 60 次，设 `GITHUB_TOKEN` 提到 5000。大文件支持断点续传，中断的安装会在下次运行时检测到并重做。
 
-Notepad-- 只收了 Windows 便携包。它发的 macOS 资产是 `.dmg` 安装镜像，Linux 资产停在 v3.8 且命名不统一，两者都不符合"解压就能跑"的模型。arm64 便携包只有部分版本附带（目前只有 3.9.1），所以 arm64 机器上 `search` 只列真正有对应资产的版本，不会给一个必然 404 的下载。
+## 各工具的细节
 
-MarkText 是 Electron 应用，Windows 和 macOS 都有 zip，Linux 给 tar.gz。它的压缩包是**扁平**的——`marktext.exe` 和 Electron 运行时文件直接在根目录，没有外层文件夹，所以安装时不剥层。这个项目还在发 `v0.24.0-rc.*`，那些会被过滤掉，只列稳定版。它是少数提供 `SHA256SUMS.txt` 的项目，下载会校验。
+**CC Switch** —— 官方 CDN 只放 v4.0.29 之后的文件，老版本还是从 GitHub 取：先试镜像，404 再回落。版本列表走 tags 接口（每页几十 KB）而不是 releases（每页几 MB）。
 
-DBeaver 的 Windows 和 Linux 有 zip/tar.gz，macOS 只有 dmg，所以 macOS 上会明确报不支持。压缩包解开是一个 `dbeaver/` 目录，里面自带 JRE（约 194MB），安装时剥掉这层。
+**MobaXterm** —— 没有 API。下载地址里的构建号无法从版本号推出，所以列表是抓下载页得到的。changelog 有完整历史，但只有最新两个稳定版挂链接；旧版本标记为 `archived`，安装会明确报错而不是给一个死链。仅 Windows。
 
-dufs 默认会换掉自带的简陋界面，用 [mikigo/dufs-shadcn-assets](https://github.com/mikigo/dufs-shadcn-assets) 那套 shadcn 皮肤。第一次 `envxx dufs` 时把资源包下到 `~/.envxx/tools/dufs/.assets`，之后直接用。你自己写了 `--assets` 就以你的为准，其他参数原样透传给 dufs。资源包拿不到时静默退回自带界面，不会因为网络问题让命令失败。
+**Windows Terminal** —— 只收稳定通道。预览版靠 `prerelease` 标记和 `WindowsTerminalPreview` 资产前缀双重过滤，所以即使某个预览版忘了打标记也会被排除。版本号四段（`1.25.3131.0`）。两个入口：`wt` 是命令行（分屏、开新标签），`WindowsTerminal` 是 GUI。
 
-Claude Code 走的是 Open VSX，不是 VSCode 官方插件市场。两边是同一批构建，我核对过大文件字节一致，但 Open VSX 有不需要登录的 REST API。opencode 和 CC Switch 都是直接取 GitHub Release 里的官方压缩包，没有二次打包。
+**Notepad--** —— 只收 Windows 便携包。它的 macOS 资产是 `.dmg` 安装镜像，Linux 资产停在 v3.8 且命名不统一，都不适合便携 store。arm64 包只有部分版本附带，所以 arm64 上 `search` 只列真正有对应资产的版本。
 
-GitHub 未登录限流每小时 60 次。设个 `GITHUB_TOKEN` 能提到 5000，反正不要钱。
+**MarkText** —— Electron 应用，Windows 和 macOS 有 zip，Linux 有 tar.gz。压缩包是扁平的：`marktext.exe` 和 Electron 运行时文件直接在根目录，没有外层文件夹，所以不剥层。发布候选（`v0.24.0-rc.*`）会被过滤掉。它提供 `SHA256SUMS.txt`，下载会校验。
 
-大文件支持断点续传，断了重跑就行，已经下过的部分不会丢。安装中断留下的残缺目录，下次 `install` 会检测到并自动重装。
+**DBeaver** —— Windows 有 zip，Linux 有 tar.gz，macOS 只有 dmg；dmg 是安装镜像，所以 macOS 上明确报不支持。压缩包解开是单个 `dbeaver/` 目录，里面自带 JRE（约 194 MB），装的时候剥掉这层。
+
+**dufs** —— 默认用 [mikigo/dufs-shadcn-assets](https://github.com/mikigo/dufs-shadcn-assets) 替换自带界面。资源包第一次运行时下到 `~/.envxx/tools/dufs/.assets`。你自己写了 `--assets` 就以你的为准；其他参数原样透传给 dufs。资源包拿不到时静默退回自带界面，而不是让命令失败。
+
+**Claude Code** —— 走 Open VSX 而不是官方 VS Code 市场。两边是同一批构建（大文件字节一致），但 Open VSX 有不需要登录的 REST API。opencode 和 CC Switch 直接用 GitHub Release 里的官方压缩包。
+
+## 开发
+
+需要 Python 3.10+。
+
+```bash
+pip install -e ".[dev]"
+python -m pytest -q
+```
+
+加工具只需写一个 provider 并注册，命令行解析是注册表驱动的，不用改。步骤见 `skills/envxx/references/adding-a-provider.md`。
+
+Windows 的启动器 shim 是一个编译好的二进制，提交在 `envxx/data/` 下。改动 `scripts/shim/shim.c` 后需要重新编译：
+
+```bash
+cmd //c scripts/shim/build.bat
+```
 
 ## 发布
 
-版本号只在 `envxx/__init__.py` 里写一次。`envxx --version` 读它，`pyproject.toml` 用 `dynamic = ["version"]` 从它读，打包出来的 zip 名用 tag。
+版本号只写在一处：`envxx/__init__.py`。`envxx --version` 读它，`pyproject.toml` 通过 `dynamic = ["version"]` 读它，发布包名来自 tag。
 
-tag 是同一个数字的第二份拷贝，两份会漂移：改了代码忘了改 tag，或者反过来。两道保险：
+tag 是同一个数字的第二份拷贝，两者会漂移。两道保险：
 
 ```bash
-scripts/release.sh --dry-run   # 读 __version__，告诉你将要打的 tag
-scripts/release.sh --push      # 打 tag 并推送，交给 CI
+scripts/release.sh --dry-run   # 读 __version__，显示将要打的 tag
+scripts/release.sh --push      # 打 tag 并推送，剩下交给 CI
 ```
 
-脚本要求工作区干净、tag 不重复，版本号直接从代码里读，不用手敲。
+脚本要求工作区干净、tag 不重复，版本号从代码里读而不是手敲。CI 在 tag 触发时还会比对 tag 和 `__version__`，不一致直接失败，版本号对不上的包发不出去。手动触发（`workflow_dispatch`）没有 tag 可比，会跳过这项检查。
 
-CI 在 tag 触发时会比对 tag 和 `__version__`，不一致直接失败，不会把版本号对不上的包发出去。手动触发（`workflow_dispatch`）没有 tag 可比，跳过这项检查。
+## 许可证
+
+[Apache-2.0](LICENSE)
