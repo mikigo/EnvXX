@@ -8,7 +8,9 @@ passed locally and failed on the Ubuntu runner.
 Running the suite natively only covers the host it runs on. This plugin makes
 both coverable from one machine:
 
-    pytest -p cross_platform --cross-platform=linux
+    PYTHONPATH=tests pytest -p cross_platform --cross-platform=linux
+
+PYTHONPATH is required: -p is resolved before pytest puts tests/ on sys.path.
 
 The patches land on the indirection points, so a test that states its own
 platform still wins: those fixtures monkeypatch the same attribute and apply
