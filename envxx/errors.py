@@ -30,5 +30,9 @@ class InstallError(EnvxxError):
     pass
 
 
+class SelfUpdateError(EnvxxError):
+    pass
+
+
 class LockTimeout(EnvxxError):
     pass

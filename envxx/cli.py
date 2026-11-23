@@ -18,9 +18,10 @@ from . import __version__
 from . import envvars
 from . import install as installer
 from . import run as runner
+from . import selfupdate
 from . import shims
 from . import store
-from .errors import EnvxxError, UsageError
+from .errors import EnvxxError, SelfUpdateError, UsageError
 from .platforms import detect_platform
 from .providers import Provider, provider_types, tool_specs
 from .providers.spec import ToolSpec
@@ -895,6 +896,79 @@ def _print_backups(kind: str) -> None:
     out.print(table)
 
 
+@app.command("self-update")
+def self_update_cmd(
+    check: bool = typer.Option(
+        False, "--check", help="report whether a newer version exists"
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="print what would happen"),
+    force: bool = typer.Option(
+        False, "--force", help="reinstall even when already current"
+    ),
+    yes: bool = typer.Option(
+        False, "--yes", help="let envxx run pipx/uv itself"
+    ),
+) -> None:
+    """Update envxx itself, from GitHub for a binary or from pip for a package."""
+    mode = selfupdate.install_mode()
+
+    if mode in ("source", "editable"):
+        raise UsageError(
+            f"this envxx runs from a working tree ({mode}); update it with "
+            f"'git pull' in that checkout"
+        )
+
+    manager = selfupdate.manager_command(mode)
+
+    if check:
+        latest = selfupdate.latest_for(mode)
+        if version_key(latest) > version_key(__version__):
+            out.print(f"envxx {latest} is available (you have {__version__})")
+        else:
+            out.print(f"envxx {__version__} is up to date")
+        return
+
+    if manager is not None and not yes:
+        # pipx and uv keep records of the environment they own; upgrading
+        # behind their back would make those records wrong
+        out.print(
+            f"envxx was installed by {mode}; upgrade it there:\n"
+            f"  {' '.join(manager)}\n"
+            f"[dim]re-run with --yes to let envxx do this[/dim]"
+        )
+        return
+
+    latest = selfupdate.latest_for(mode)
+    if version_key(latest) <= version_key(__version__) and not force:
+        out.print(f"envxx {__version__} is already the latest")
+        return
+
+    if dry_run:
+        if mode == "frozen":
+            platform = detect_platform()
+            out.print(f"would download {latest}-{platform.tag}.zip and replace {sys.executable}")
+        elif manager is not None:
+            out.print(f"would run {' '.join(manager)}")
+        else:
+            out.print(f"would pip install --upgrade envxx ({__version__} -> {latest})")
+        return
+
+    out.print(f"updating envxx {__version__} -> {latest}")
+    if mode == "frozen":
+        path = selfupdate.upgrade_frozen(latest)
+        out.print(f"[green]updated[/green] {path}")
+    elif manager is not None:
+        selfupdate.run_manager_upgrade(mode)
+        out.print(f"[green]updated[/green] envxx via {mode}")
+    else:
+        installed = selfupdate.upgrade_with_pip()
+        if installed and version_key(installed) <= version_key(__version__):
+            raise SelfUpdateError(
+                f"pip reported success but envxx is still {installed or __version__}"
+            )
+        out.print(f"[green]updated[/green] envxx to {installed or latest}")
+
+
 @app.command("bin")
 def bin_cmd() -> None:
     """List the launcher shims in the bin directory and how to put them on PATH."""
@@ -964,6 +1038,29 @@ def _silence_streams() -> None:
             pass
 
 
+# Commands whose output something else consumes: a hint appended to them
+# would be read as part of the answer. 'self-update' is excluded because it
+# has just said the same thing, at length.
+_NO_NOTICE_COMMANDS = ("--version", "-V", "--help", "-h")
+_MACHINE_READ_COMMANDS = ("where", "bin", "self-update")
+
+
+def _print_update_notice(argv: list[str]) -> None:
+    """Mention a newer envxx on stderr, when that is welcome.
+
+    On stderr so a redirected stdout still holds exactly the command's own
+    output, and after a command that succeeded so the hint never appears
+    where the reader is looking for an error.
+    """
+    if not argv:
+        return
+    if argv[0] in _NO_NOTICE_COMMANDS or argv[0] in _MACHINE_READ_COMMANDS:
+        return
+    message = selfupdate.notice()
+    if message:
+        err.print(f"[dim]{message}[/dim]")
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
 
@@ -980,6 +1077,13 @@ def main(argv: list[str] | None = None) -> int:
     except OSError:
         # an unwritable store is a problem for the command that needs it, not
         # for 'envxx --help'
+        pass
+
+    # an update that replaced the binary could not delete the old one while
+    # its own process was still running; this is the first chance to clear it
+    try:
+        selfupdate.sweep_stale()
+    except OSError:
         pass
 
     try:
@@ -1022,6 +1126,7 @@ def main(argv: list[str] | None = None) -> int:
             if should_run:
                 return _dispatch_run(token, rest)
         app(args=argv, standalone_mode=False)
+        _print_update_notice(argv)
         return 0
     except EnvxxError as exc:
         err.print(f"[red]error:[/red] {exc}")

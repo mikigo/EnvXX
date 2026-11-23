@@ -185,6 +185,29 @@ envxx python3.10 set-path      # 生成 ~/.envxx/bin/python3.10.exe，并把 bin
 
 启动器永远指向全局 store。PATH 是机器级的，指向项目里的副本会在项目删除后失效，所以项目内执行 `set-path` 会直接报错。`--remove` 用来删除。
 
+### 更新 envxx 自己
+
+```bash
+envxx self-update            # 更新
+envxx self-update --check    # 只看有没有新版
+envxx self-update --dry-run  # 只打印会做什么
+```
+
+上游按安装方式自动选：
+
+| 怎么装的 | 从哪里更新 |
+| --- | --- |
+| 下载的二进制 | GitHub Releases，覆盖自身 |
+| `pip install envxx` | `pip install --upgrade envxx` |
+| `pipx install envxx` | 提示 `pipx upgrade envxx`，加 `--yes` 才代跑 |
+| `uv tool install envxx` | 提示 `uv tool upgrade envxx`，加 `--yes` 才代跑 |
+
+从源码 checkout（含 editable 安装）会直接拒绝，提示用 `git pull`。
+
+Windows 上正在运行的 exe 不能覆盖，但可以改名：旧文件先挪成 `envxx.exe.old`，新文件顶上去，`.old` 在下次启动时删除。替换失败会自动把旧的改回来，不会留下一个跑不了的 envxx。新二进制会先跑一次 `--version` 校验，对不上就不替换。
+
+终端里执行普通命令时，如果有新版会在 stderr 提示一行；设 `ENVXX_NO_UPDATE_CHECK=1` 关闭，CI 环境自动不提示。
+
 ### 环境变量
 
 ```bash

@@ -137,6 +137,12 @@ envxx bin                      # 列出已生成的命令
 - shim 永远指向**全局** store：PATH 是机器级的，指向项目会在项目删除后失效。项目内对 runtime 执行 `set-path` 会报错，这是有意的。
 - `set-path --remove` 删除 shim 或从 PATH 摘除目录；`envxx unset-path <dir>` 是它摘目录的专用写法，动词和 `set-env --unset` 一致。
 
+### 更新 envxx 自己
+
+`envxx self-update` 按安装方式选上游：下载的二进制走 GitHub Releases 覆盖自身，`pip install` 的走 `pip install --upgrade`，pipx/uv tool 装的只打印对应命令（加 `--yes` 才代跑），源码并从 checkout 运行的直接拒绝并提示 `git pull`。`--check` 只看版本，`--dry-run` 只打印。
+
+Windows 用改名法替换（旧文件挪成 `.old`，下次启动清扫），失败会把旧文件改回来；新二进制替换前先跑 `--version` 校验。终端里执行命令时如有新版本会在 **stderr** 提示一行，`ENVXX_NO_UPDATE_CHECK=1` 关闭，CI 自动不提示。
+
 ### 环境变量
 
 `envxx set-env NAME VALUE` 写用户级环境变量（Windows 注册表、POSIX shell rc），`--unset` 删除，`--list` 查看。`PATH` 会被拒绝，必须用 `set-path` 以免整条覆盖。
