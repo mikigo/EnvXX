@@ -88,20 +88,35 @@ def _fake_target(monkeypatch, exe: Path):
     )
 
 
+@pytest.fixture
+def on_windows(monkeypatch):
+    """Pin the shim format regardless of the host running the tests.
+
+    shims.create branches on the host platform. A test that assumes the
+    Windows form without saying so passes locally and fails on the Ubuntu
+    runner, which is exactly how this suite broke once.
+    """
+    monkeypatch.setattr(shims, "_is_windows", lambda: True)
+
+
+@pytest.fixture
+def on_posix(monkeypatch):
+    monkeypatch.setattr(shims, "_is_windows", lambda: False)
+
+
 def test_shim_dir_is_always_the_global_store(home):
     """PATH belongs to the machine, so a project store never gets a bin/."""
     assert shims.shim_dir() == store.global_home() / "bin"
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX shim form")
-def test_a_posix_shim_execs_relative_to_itself(home, monkeypatch):
+def test_a_posix_shim_execs_relative_to_itself(home, on_posix, monkeypatch):
+    """The shell form must be covered on every host, not only on Linux."""
     exe = store.version_dir("python", "3.12.16", kind="runtime", scoped=False)
     exe = exe / "bin" / "python3"
     exe.parent.mkdir(parents=True)
     exe.write_text("")
     _fake_target(monkeypatch, exe)
     monkeypatch.setattr(envvars, "is_windows", lambda: False)
-    monkeypatch.setattr(os, "name", "posix")
 
     written = shims.create(_StubProvider(), "3.12.16", label="3.12")
 
@@ -112,10 +127,13 @@ def test_a_posix_shim_execs_relative_to_itself(home, monkeypatch):
     # relative, so moving the whole store keeps the shim working
     assert "$(dirname \"$0\")/" in body
     assert str(exe) not in body
-    assert path.stat().st_mode & 0o111
+    # the executable bit only exists on a POSIX filesystem; the shell form is
+    # still worth checking on Windows, where chmod cannot express it
+    if os.name != "nt":
+        assert path.stat().st_mode & 0o111
 
 
-def test_a_windows_shim_is_an_exe_carrying_a_relative_target(home, monkeypatch):
+def test_a_windows_shim_is_an_exe_carrying_a_relative_target(home, monkeypatch, on_windows):
     """A .bat would lose quoting; the exe launcher keeps argv intact."""
     exe = store.version_dir("python", "3.12.16", kind="runtime", scoped=False)
     exe = exe / "python.exe"
@@ -139,7 +157,7 @@ def test_a_windows_shim_is_an_exe_carrying_a_relative_target(home, monkeypatch):
     assert not stored.startswith("/"), "a rooted path would not survive a move"
 
 
-def test_the_shim_is_named_after_the_requested_line(home, monkeypatch):
+def test_the_shim_is_named_after_the_requested_line(home, monkeypatch, on_windows):
     """python3.10, not the resolved python3.10.22: a patch release must not
     orphan the command."""
     exe = store.version_dir("python", "3.10.22", kind="runtime", scoped=False)
@@ -154,7 +172,7 @@ def test_the_shim_is_named_after_the_requested_line(home, monkeypatch):
     assert "python3.10" in written[0].name
 
 
-def test_remove_deletes_only_envxx_shims(home, monkeypatch):
+def test_remove_deletes_only_envxx_shims(home, monkeypatch, on_windows):
     exe = store.version_dir("python", "3.12.16", kind="runtime", scoped=False)
     exe = exe / "python.exe"
     exe.parent.mkdir(parents=True)
@@ -175,7 +193,7 @@ def test_remove_deletes_only_envxx_shims(home, monkeypatch):
     assert removed
 
 
-def test_existing_lists_only_generated_files(home, monkeypatch):
+def test_existing_lists_only_generated_files(home, monkeypatch, on_windows):
     exe = store.version_dir("python", "3.12.16", kind="runtime", scoped=False)
     exe = exe / "python.exe"
     exe.parent.mkdir(parents=True)
