@@ -31,6 +31,13 @@ path = "envxx/__init__.py"
 [tool.hatch.build.targets.wheel]
 packages = ["envxx"]
 
+# The launcher used to create shims on Windows is a compiled binary, shipped
+# inside the package so that 'set_path' works without a compiler on the user's
+# machine. hatchling includes package data by default; this states it so a
+# later exclusion cannot silently drop it.
+[tool.hatch.build.targets.wheel.force-include]
+"envxx/data/envxx-shim.exe" = "envxx/data/envxx-shim.exe"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [

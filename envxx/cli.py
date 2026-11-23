@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import errno
+import json
 import os
 import re
 import sys
@@ -13,8 +14,10 @@ from rich.table import Table
 from ._click import ClickExit, ClickNoArgsIsHelp, ClickUsageError
 
 from . import __version__
+from . import envvars
 from . import install as installer
 from . import run as runner
+from . import shims
 from . import store
 from .errors import EnvxxError, UsageError
 from .platforms import detect_platform
@@ -290,12 +293,14 @@ def _dir_size(path: Path) -> int:
 # Names that manage the store rather than run the tool. A selector in front of
 # one of them ('python3.12 install') used to fall through to execution, so the
 # word became a script path and python died looking for a file called install.
-MANAGE_COMMANDS = ("search", "list", "install", "uninstall", "update", "where", "rm")
+MANAGE_COMMANDS = (
+    "search", "list", "install", "uninstall", "update", "where", "rm", "set_path",
+)
 
 # Of those, the ones that take a version argument. 'list' and 'search' scope
 # over every installed or published version, so a selector in front of them
 # carries no meaning and is simply dropped.
-VERSIONED_COMMANDS = ("install", "uninstall", "where", "rm")
+VERSIONED_COMMANDS = ("install", "uninstall", "where", "rm", "set_path")
 
 
 def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
@@ -451,6 +456,66 @@ def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
         # wrapping: at 80 columns it would break the path across two lines
         typer.echo(runner.which(provider, resolved))
 
+    @group.command("set_path")
+    def set_path_shim(
+        version: str | None = typer.Argument(
+            None, help="version to point at (default: the newest installed)"
+        ),
+        remove: bool = typer.Option(False, "--remove", help="delete the shim"),
+    ) -> None:
+        """Create a launcher in the bin directory so the tool can be called by name."""
+        provider = _provider(spec)
+
+        if remove:
+            target = version
+            removed = []
+            for installed_version in _installed_versions(provider):
+                if target and not best_match([installed_version], target):
+                    continue
+                label = target or _default_label(provider, installed_version)
+                removed.extend(shims.remove(spec.name, label))
+            if not removed:
+                raise UsageError(f"no {spec.name} shim to remove")
+            for path in removed:
+                out.print(f"removed {_display_path(path)}")
+            return
+
+        resolved = shims.require_installed(provider, version)
+        # the command is named after what the user asked for ('python3.10'),
+        # not the resolved patch, so a patch upgrade does not orphan it
+        label = version or _default_label(provider, resolved)
+        written = shims.create(provider, resolved, label=label)
+        name = shims.shim_name(spec.name, label)
+        for path in written:
+            out.print(f"created {_display_path(path)}")
+
+        folder = shims.shim_dir()
+        on_path = any(
+            Path(entry).expanduser() == folder
+            for entry in envvars.read_path().split(os.pathsep)
+            if entry
+        )
+        if not on_path:
+            err.print(
+                f"[dim]{folder} is not on PATH yet; "
+                f"run 'envxx set_path {folder}' to add it[/dim]"
+            )
+        else:
+            _remind_new_shell()
+            out.print(f"[dim]run '{name}' once the terminal is reopened[/dim]")
+
+
+def _default_label(provider: Provider, resolved: str) -> str:
+    """Shim name when the user gave no version: the minor line for runtimes.
+
+    'envxx python3.10 set_path' and 'envxx python set_path' both end up with a
+    label that survives the next patch release.
+    """
+    if provider.spec.kind != "runtime":
+        return ""
+    parts = resolved.split(".")
+    return ".".join(parts[:2]) if len(parts) >= 2 else resolved
+
 
 for _spec in tool_specs():
     _group = typer.Typer(
@@ -560,6 +625,161 @@ def init_cmd(
         "[dim]runtimes installed from here stay in this directory; "
         "applications always go to the global store[/dim]"
     )
+
+
+# ---------------------------------------------------------------------------
+# environment variables
+# ---------------------------------------------------------------------------
+@app.command("set_env")
+def set_env_cmd(
+    name: str | None = typer.Argument(None, help="variable name"),
+    value: str | None = typer.Argument(None, help="value to store"),
+    unset: bool = typer.Option(False, "--unset", help="remove the variable"),
+    system: bool = typer.Option(False, "--system", help="for every user (needs admin)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="print the change only"),
+    list_values: bool = typer.Option(False, "--list", help="show envxx-managed names"),
+) -> None:
+    """Set a permanent environment variable for the current user."""
+    if list_values:
+        _print_backups("env")
+        return
+    if not name:
+        raise UsageError("usage: envxx set_env NAME VALUE [--unset] [--system]")
+
+    if unset:
+        if dry_run:
+            out.print(f"would unset {name}")
+            return
+        gone = envvars.unset_env(name, system=system)
+        out.print(f"unset {name}" if gone else f"{name} was not set by envxx")
+        _remind_new_shell()
+        return
+
+    if value is None:
+        raise UsageError("a value is required unless --unset is given")
+
+    if dry_run:
+        out.print(f"would set {name}={value}")
+        return
+    previous = envvars.set_env(name, value, system=system)
+    if previous is not None and previous != value:
+        out.print(f"[dim]previous value: {previous}[/dim]")
+    out.print(f"set {name}={value}")
+    _remind_new_shell()
+
+
+@app.command("set_path")
+def set_path_cmd(
+    path: str | None = typer.Argument(
+        None, help="directory to add (relative paths are expanded)"
+    ),
+    remove: bool = typer.Option(False, "--remove", help="take the directory off PATH"),
+    system: bool = typer.Option(False, "--system", help="for every user (needs admin)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="print the change only"),
+    list_values: bool = typer.Option(False, "--list", help="show envxx-managed paths"),
+) -> None:
+    """Add a directory to the permanent PATH."""
+    if list_values:
+        _print_backups("path")
+        return
+    if not path:
+        raise UsageError("usage: envxx set_path PATH [--remove] [--system]")
+
+    if dry_run:
+        target = str(Path(path).expanduser())
+        out.print(f"would {'remove' if remove else 'add'} {target}")
+        return
+
+    if remove:
+        gone = envvars.remove_path(path, system=system)
+        out.print(f"removed {path} from PATH" if gone else f"{path} is not on PATH")
+    else:
+        expanded, changed = envvars.set_path(path, system=system)
+        if changed:
+            out.print(f"added {expanded} to PATH")
+        else:
+            # saying "reopen your terminal" here would suggest something
+            # changed when the entry was already there
+            out.print(f"{expanded} is already on PATH")
+            return
+    _remind_new_shell()
+
+
+def _shim_target(path: Path) -> str:
+    """The executable a shim points at, made short for the table."""
+    relative = shims.target_of(path)
+    if not relative:
+        return ""
+
+    resolved = (path.parent / relative).resolve()
+    try:
+        return str(resolved.relative_to(store.global_home()).as_posix())
+    except ValueError:
+        return str(resolved)
+
+
+def _remind_new_shell() -> None:
+    err.print(
+        "[dim]open a new terminal for this to take effect; "
+        "already-running ones keep their old environment[/dim]"
+    )
+
+
+def _print_backups(kind: str) -> None:
+    entries = [p for p in envvars.backups() if p.name.startswith(f"{kind}-")]
+    if not entries:
+        err.print(f"[dim]envxx has not set any {kind} values[/dim]")
+        return
+
+    table = Table(title=f"{kind} values set by envxx", header_style="bold")
+    table.add_column("name")
+    table.add_column("value")
+    table.add_column("when")
+    for path in entries[:20]:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        table.add_row(
+            str(data.get("name", "")),
+            str(data.get("previous", "")) or "[dim](unset)[/dim]",
+            str(data.get("at", "")),
+        )
+    out.print(table)
+
+
+@app.command("bin")
+def bin_cmd() -> None:
+    """List the launcher shims in the bin directory and how to put them on PATH."""
+    found = shims.existing()
+    folder = shims.shim_dir()
+
+    if not found:
+        err.print("[dim]no shims yet; 'envxx <tool> set_path' creates one[/dim]")
+        return
+
+    # a command has one file per platform convention (bat and cmd on
+    # Windows); listing both rows would read as two separate commands
+    grouped: dict[str, list[Path]] = {}
+    for path in found:
+        grouped.setdefault(path.stem, []).append(path)
+
+    table = Table(title="envxx bin", header_style="bold")
+    table.add_column("command")
+    table.add_column("runs")
+    for name in sorted(grouped):
+        table.add_row(name, _shim_target(grouped[name][0]))
+    out.print(table)
+
+    on_path = any(
+        Path(entry).expanduser() == folder for entry in envvars.read_path().split(os.pathsep)
+        if entry
+    )
+    if not on_path:
+        err.print(
+            f"[dim]{folder} is not on PATH; "
+            f"run 'envxx set_path {folder}' to add it[/dim]"
+        )
 
 
 # ---------------------------------------------------------------------------

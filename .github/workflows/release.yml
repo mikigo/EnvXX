@@ -82,6 +82,7 @@ jobs:
         run: >
           pyinstaller --clean --noconfirm --onefile --name envxx
           --paths . --hidden-import envxx
+          --add-data "envxx/data/envxx-shim.exe:envxx/data"
           --distpath dist --workpath build/work --specpath build
           envxx/__main__.py
 
