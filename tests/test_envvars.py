@@ -297,6 +297,19 @@ def test_set_path_is_hidden_for_installers(capsys):
     assert "set-path" in capsys.readouterr().out
 
 
+def _unwrapped(text: str) -> str:
+    """Drop every whitespace character before matching a printed message.
+
+    rich wraps at the terminal width, and a tmp_path is wider than that, so a
+    single message arrives with newlines inside it. Removing the newlines is
+    not enough: rich also breaks a long word mid-segment, and the break lands
+    next to a space ('... to' / 'PATH'), which leaves 'toPATH' behind. The
+    lengths differ between a POSIX and a Windows tmp_path, so an assertion
+    that survives one host can fail on the other.
+    """
+    return "".join(text.split())
+
+
 def test_set_path_adds_the_bin_directory_when_it_is_missing(
     tmp_path, monkeypatch, capsys
 ):
@@ -327,10 +340,9 @@ def test_set_path_adds_the_bin_directory_when_it_is_missing(
     assert main(["python3.10", "set-path"]) == 0
 
     assert added == [str(folder)], "the bin directory must be put on PATH"
-    # rich wraps at the terminal width, and a tmp_path is longer than that
-    printed = capsys.readouterr().out.replace("\n", "")
-    assert f"added {folder} to PATH" in printed
-    assert "not on PATH" not in printed
+    printed = _unwrapped(capsys.readouterr().out)
+    assert _unwrapped(f"added {folder} to PATH") in printed
+    assert "notonPATH" not in printed
 
 
 def test_set_path_leaves_a_bin_directory_already_on_path_alone(
@@ -393,12 +405,12 @@ def test_a_failed_path_write_still_reports_the_created_shim(
 
     printed = capsys.readouterr()
     # rich wraps a long path at the terminal width; the words are what matter
-    flat_out = printed.out.replace("\n", "")
-    flat_err = printed.err.replace("\n", "")
+    flat_out = _unwrapped(printed.out)
+    flat_err = _unwrapped(printed.err)
     assert "created" in flat_out
-    assert str(folder / "python3.10.exe") in flat_out
-    assert "could not add" in flat_err
-    assert f"envxx set-path {folder}" in flat_err
+    assert _unwrapped(str(folder / "python3.10.exe")) in flat_out
+    assert "couldnotadd" in flat_err
+    assert _unwrapped(f"envxx set-path {folder}") in flat_err
 
 
 def test_bin_prints_the_whole_path(tmp_path, monkeypatch, capsys):
