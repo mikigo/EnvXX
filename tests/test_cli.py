@@ -651,6 +651,36 @@ def test_the_workflow_checks_the_tag_against_the_version():
     assert "startsWith(github.ref, 'refs/tags/')" in workflow
 
 
+def test_the_build_passes_pyinstaller_an_absolute_shim_path():
+    """--specpath makes every relative path in --add-data resolve against the
+    spec directory, not the working directory.
+
+    The build step named the shim relatively while also writing the spec into
+    build/, so PyInstaller looked for build/envxx/data/envxx-shim.exe. That
+    file does not exist, and all six platform builds failed on it — after the
+    tests had already gone green, which is why the tag shipped nothing.
+    """
+    root = Path(__file__).resolve().parent.parent
+    workflow = (root / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8"
+    )
+    build_step = workflow.split("- name: build", 1)[1].split("- name:", 1)[0]
+
+    add_data = [
+        line.strip()
+        for line in build_step.splitlines()
+        if "--add-data" in line
+    ]
+    assert add_data, "the build no longer ships the shim binary"
+    for line in add_data:
+        assert "$GITHUB_WORKSPACE/" in line or line.startswith("/"), (
+            "a relative --add-data path is resolved against --specpath, "
+            f"not the checkout: {line}"
+        )
+    # the flag and the value have to stay on the same line for '>' folding
+    assert "envxx/data/envxx-shim.exe:envxx/data" in add_data[0]
+
+
 # -- help grouping -----------------------------------------------------------
 def test_help_splits_commands_into_panels(capsys):
     """A flat list of twenty tools hides which ones install a runtime."""

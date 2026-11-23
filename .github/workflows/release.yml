@@ -90,10 +90,11 @@ jobs:
           pip install -e . pyinstaller
 
       - name: build
+        shell: bash
         run: >
           pyinstaller --clean --noconfirm --onefile --name envxx
           --paths . --hidden-import envxx
-          --add-data "envxx/data/envxx-shim.exe:envxx/data"
+          --add-data "$GITHUB_WORKSPACE/envxx/data/envxx-shim.exe:envxx/data"
           --distpath dist --workpath build/work --specpath build
           envxx/__main__.py
 
