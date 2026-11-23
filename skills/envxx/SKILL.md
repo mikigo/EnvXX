@@ -135,7 +135,7 @@ envxx bin                      # 列出已生成的命令
 - `set-path` 默认**前置**，新加的目录才有机会生效；`--append` 放末尾。
 - 已存在的条目不重排，重复执行是幂等的。
 - shim 永远指向**全局** store：PATH 是机器级的，指向项目会在项目删除后失效。项目内对 runtime 执行 `set-path` 会报错，这是有意的。
-- `set-path --remove` 删除 shim 或从 PATH 摘除目录。
+- `set-path --remove` 删除 shim 或从 PATH 摘除目录；`envxx unset-path <dir>` 是它摘目录的专用写法，动词和 `set-env --unset` 一致。
 
 ### 环境变量
 

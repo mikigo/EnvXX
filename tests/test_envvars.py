@@ -413,6 +413,77 @@ def test_a_failed_path_write_still_reports_the_created_shim(
     assert _unwrapped(f"envxx set-path {folder}") in flat_err
 
 
+def _record_remove(monkeypatch):
+    """Patch the PATH primitives so a CLI call is observable and harmless."""
+    removed = []
+    monkeypatch.setattr(
+        envvars,
+        "remove_path",
+        lambda directory, system=False: removed.append(directory) or True,
+    )
+    monkeypatch.setattr("envxx.cli._remind_new_shell", lambda: None)
+    return removed
+
+
+def test_unset_path_removes_a_directory(tmp_path, monkeypatch, capsys):
+    """set-env spells removal --unset, so set-path's --remove is not the verb
+    a user reaches for; 'unset-path' has to work as its own command."""
+    from envxx.cli import main
+
+    removed = _record_remove(monkeypatch)
+
+    assert main(["unset-path", r"C:\app"]) == 0
+
+    assert removed == [r"C:\app"]
+    assert "removed" in _unwrapped(capsys.readouterr().out)
+
+
+def test_unset_path_needs_a_directory(capsys):
+    """Same exit code and shape as 'set-path' with no argument."""
+    from envxx.cli import main
+
+    assert main(["unset-path"]) == 1
+    assert _unwrapped("usage: envxx unset-path") in _unwrapped(
+        capsys.readouterr().err
+    )
+
+
+def test_unset_path_reports_a_missing_entry(tmp_path, monkeypatch, capsys):
+    """Removing something that is not there is not an error, but it must not
+    claim to have removed it either."""
+    from envxx.cli import main
+
+    monkeypatch.setattr(
+        envvars, "remove_path", lambda directory, system=False: False
+    )
+    monkeypatch.setattr("envxx.cli._remind_new_shell", lambda: None)
+
+    assert main(["unset-path", r"C:\nowhere"]) == 0
+    assert "isnotonPATH" in _unwrapped(capsys.readouterr().out)
+
+
+def test_unset_path_dry_run_writes_nothing(monkeypatch, capsys):
+    from envxx.cli import main
+
+    monkeypatch.setattr(
+        envvars, "remove_path", lambda *a, **k: pytest.fail("PATH was rewritten")
+    )
+
+    assert main(["unset-path", r"C:\app", "--dry-run"]) == 0
+    assert "wouldremove" in _unwrapped(capsys.readouterr().out)
+
+
+def test_set_path_still_accepts_remove_and_unset(monkeypatch, capsys):
+    """The old spelling keeps working; --unset is the new alias beside it."""
+    from envxx.cli import main
+
+    for flag in ("--remove", "--unset"):
+        removed = _record_remove(monkeypatch)
+        assert main(["set-path", r"C:\app", flag]) == 0
+        assert removed == [r"C:\app"], flag
+        capsys.readouterr()
+
+
 def test_bin_prints_the_whole_path(tmp_path, monkeypatch, capsys):
     """A truncated path is useless: the reader is meant to copy it."""
     from envxx.cli import main

@@ -181,6 +181,8 @@ envxx python3.10 set-path      # 生成 ~/.envxx/bin/python3.10.exe，并把 bin
 
 目录默认加在**最前面**，刚加进去的应该优先；放末尾用 `--append`。已经存在的条目不动，重复执行是幂等的。
 
+摘掉一个目录用 `envxx unset-path <dir>`（等价于 `envxx set-path <dir> --remove`）。
+
 启动器永远指向全局 store。PATH 是机器级的，指向项目里的副本会在项目删除后失效，所以项目内执行 `set-path` 会直接报错。`--remove` 用来删除。
 
 ### 环境变量

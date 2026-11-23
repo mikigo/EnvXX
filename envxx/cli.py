@@ -748,25 +748,22 @@ def set_env_cmd(
     _remind_new_shell()
 
 
-@app.command("set-path")
-def set_path_cmd(
-    path: str | None = typer.Argument(
-        None, help="directory to add (relative paths are expanded)"
-    ),
-    remove: bool = typer.Option(False, "--remove", help="take the directory off PATH"),
-    append: bool = typer.Option(
-        False, "--append", help="add at the end instead of the front"
-    ),
-    system: bool = typer.Option(False, "--system", help="for every user (needs admin)"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="print the change only"),
-    list_values: bool = typer.Option(False, "--list", help="show envxx-managed paths"),
+def _edit_path(
+    path: str | None,
+    *,
+    remove: bool,
+    append: bool,
+    system: bool,
+    dry_run: bool,
+    command: str,
 ) -> None:
-    """Put a directory on the permanent PATH, in front by default."""
-    if list_values:
-        _print_backups("path")
-        return
+    """Add or remove one PATH entry.
+
+    Shared by 'set-path' and 'unset-path' so the two spellings cannot drift
+    into printing different messages for the same change.
+    """
     if not path:
-        raise UsageError("usage: envxx set-path PATH [--remove] [--system]")
+        raise UsageError(f"usage: envxx {command} PATH")
 
     if dry_run:
         target = str(Path(path).expanduser())
@@ -787,6 +784,56 @@ def set_path_cmd(
             out.print(f"{expanded} is already on PATH")
             return
     _remind_new_shell()
+
+
+@app.command("set-path")
+def set_path_cmd(
+    path: str | None = typer.Argument(
+        None, help="directory to add (relative paths are expanded)"
+    ),
+    remove: bool = typer.Option(
+        False, "--remove", "--unset", help="take the directory off PATH"
+    ),
+    append: bool = typer.Option(
+        False, "--append", help="add at the end instead of the front"
+    ),
+    system: bool = typer.Option(False, "--system", help="for every user (needs admin)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="print the change only"),
+    list_values: bool = typer.Option(False, "--list", help="show envxx-managed paths"),
+) -> None:
+    """Put a directory on the permanent PATH, in front by default."""
+    if list_values:
+        _print_backups("path")
+        return
+    _edit_path(
+        path,
+        remove=remove,
+        append=append,
+        system=system,
+        dry_run=dry_run,
+        command="set-path",
+    )
+
+
+@app.command("unset-path")
+def unset_path_cmd(
+    path: str | None = typer.Argument(None, help="directory to take off PATH"),
+    system: bool = typer.Option(False, "--system", help="for every user (needs admin)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="print the change only"),
+) -> None:
+    """Take a directory off the permanent PATH.
+
+    The counterpart of set-path, so the verb matches set-env's --unset rather
+    than making the user remember that PATH removal is spelled --remove.
+    """
+    _edit_path(
+        path,
+        remove=True,
+        append=False,
+        system=system,
+        dry_run=dry_run,
+        command="unset-path",
+    )
 
 
 def _shim_target(path: Path) -> str:
