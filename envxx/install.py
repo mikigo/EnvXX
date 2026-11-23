@@ -163,6 +163,43 @@ def _fetch_installer(provider: Provider, plan, *, quiet: bool) -> Path:
     return dest
 
 
+def _host() -> str:
+    """Which desktop convention this process is running under.
+
+    Indirected for the same reason as shims._is_windows: os.name cannot be
+    patched in a test on Windows without breaking pathlib, so leaving the
+    comparison inline means the two non-Windows branches are unreachable on a
+    Windows host and the Windows branch is unreachable on the Ubuntu runner.
+    That asymmetry is invisible until CI runs.
+    """
+    if os.name == "nt":
+        return "windows"
+    if sys.platform == "darwin":
+        return "macos"
+    return "linux"
+
+
+def _opener_argv(host: str, path: Path) -> list[str] | None:
+    """The command that hands a file to the desktop, or None for the shell API.
+
+    Windows gets None: os.startfile uses the file association directly and
+    starts no console window, which a subprocess call would flash.
+    """
+    if host == "windows":
+        return None
+    if host == "macos":
+        return ["open", str(path)]
+    return ["xdg-open", str(path)]
+
+
+def _open_with_desktop(path: Path, host: str | None = None) -> None:
+    argv = _opener_argv(host or _host(), path)
+    if argv is None:
+        os.startfile(path)  # type: ignore[attr-defined]
+    else:
+        subprocess.Popen(argv)
+
+
 def launch_installer(path: Path, *, quiet: bool) -> bool:
     """Hand the downloaded installer to the desktop so the user can run it.
 
@@ -176,12 +213,7 @@ def launch_installer(path: Path, *, quiet: bool) -> bool:
         return False
 
     try:
-        if os.name == "nt":
-            os.startfile(path)  # type: ignore[attr-defined]
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", str(path)])
-        else:
-            subprocess.Popen(["xdg-open", str(path)])
+        _open_with_desktop(path)
     except OSError as exc:
         console.print(f"[yellow]could not open the installer:[/yellow] {exc}")
         return False

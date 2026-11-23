@@ -14,7 +14,17 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Two hosts, not one. The suite spends a lot of effort deciding which
+    # platform it is on — shim format, shell rc files, the registry, the
+    # desktop opener — and a Windows-only or Linux-only run leaves half of
+    # those branches untested while reporting green. This shipped twice
+    # before: tests that assumed the Windows shim form and the os.startfile
+    # opener passed locally and failed on the Ubuntu runner.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -28,6 +38,7 @@ jobs:
       # ships a 1.6.0 zip that answers 'envxx 1.5.0'. Fail before building.
       - name: version matches the tag
         if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
         run: |
           tag="${GITHUB_REF_NAME#v}"
           code=$(python -c "import envxx; print(envxx.__version__)")

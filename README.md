@@ -326,6 +326,14 @@ pip install -e ".[dev]"
 python -m pytest -q
 ```
 
+平台相关代码（shim 格式、shell rc 文件、注册表、桌面打开方式）只有真跑在对应系统上才会走到。本机只能覆盖一个平台，所以有一套交叉开关：
+
+```bash
+PYTHONPATH=tests python -m pytest -q -p cross_platform --cross-platform=linux
+```
+
+三种取值：`windows`、`linux`、`macos`。CI 在 Ubuntu 和 Windows 上各跑一遍，本地的 `--cross-platform` 用于在推送前确认另一半。
+
 加工具只需写一个 provider 并注册，命令行解析是注册表驱动的，不用改。步骤见 `skills/envxx/references/adding-a-provider.md`。
 
 Windows 的启动器 shim 是一个编译好的二进制，提交在 `envxx/data/` 下。改动 `scripts/shim/shim.c` 后需要重新编译：

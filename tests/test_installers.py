@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -237,7 +238,18 @@ def test_installer_specs_are_registered():
 
 
 # -- launching the installer -------------------------------------------------
-def test_an_installer_is_opened_for_the_user(tmp_path, monkeypatch):
+@pytest.fixture
+def on_windows(monkeypatch):
+    """Pin the desktop convention regardless of the host running the tests.
+
+    launch_installer branches on the platform. os.startfile does not exist
+    on the Ubuntu runner, so a test that patches it and expects it to be
+    called passes on Windows and hits xdg-open on Linux.
+    """
+    monkeypatch.setattr("envxx.install._host", lambda: "windows")
+
+
+def test_an_installer_is_opened_for_the_user(tmp_path, monkeypatch, on_windows):
     """Downloading an installer is only useful if it gets offered to run."""
     from envxx.install import launch_installer
 
@@ -249,7 +261,7 @@ def test_an_installer_is_opened_for_the_user(tmp_path, monkeypatch):
     assert opened == [tmp_path / "a.exe"]
 
 
-def test_a_quiet_run_never_opens_anything(tmp_path, monkeypatch):
+def test_a_quiet_run_never_opens_anything(tmp_path, monkeypatch, on_windows):
     from envxx.install import launch_installer
 
     opened = []
@@ -259,7 +271,7 @@ def test_a_quiet_run_never_opens_anything(tmp_path, monkeypatch):
     assert opened == []
 
 
-def test_a_piped_run_never_opens_anything(tmp_path, monkeypatch):
+def test_a_piped_run_never_opens_anything(tmp_path, monkeypatch, on_windows):
     """CI has no desktop; opening a window there would hang or fail."""
     from envxx.install import launch_installer
 
@@ -271,7 +283,9 @@ def test_a_piped_run_never_opens_anything(tmp_path, monkeypatch):
     assert opened == []
 
 
-def test_a_failure_to_open_is_reported_not_raised(tmp_path, monkeypatch, capsys):
+def test_a_failure_to_open_is_reported_not_raised(
+    tmp_path, monkeypatch, capsys, on_windows
+):
     from envxx.install import launch_installer
 
     def boom(path):
@@ -283,6 +297,37 @@ def test_a_failure_to_open_is_reported_not_raised(tmp_path, monkeypatch, capsys)
     # the file is already downloaded; failing to open it is not fatal
     assert launch_installer(tmp_path / "a.exe", quiet=False) is False
     assert "could not open" in capsys.readouterr().err + capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "host,expected",
+    [
+        ("windows", None),
+        ("macos", ["open", "VSCodeUserSetup-x64-1.147.0.exe"]),
+        ("linux", ["xdg-open", "VSCodeUserSetup-x64-1.147.0.exe"]),
+    ],
+)
+def test_each_platform_uses_its_own_opener(host, expected):
+    """The POSIX branches must be reachable on any host, not only on Linux."""
+    from envxx.install import _opener_argv
+
+    argv = _opener_argv(host, Path("VSCodeUserSetup-x64-1.147.0.exe"))
+    if expected is None:
+        assert argv is None, "Windows uses the shell file association"
+    else:
+        assert argv[0] == expected[0]
+        assert argv[1].endswith(expected[1])
+
+
+def test_the_host_is_one_the_opener_knows():
+    """launch_installer picks a branch by asking _host; a fourth value would
+    silently fall through to xdg-open on a Mac."""
+    from envxx.install import _host, _opener_argv
+
+    host = _host()
+    assert host in ("windows", "macos", "linux")
+    # every known host must map to a branch, not to a KeyError later
+    assert _opener_argv(host, Path("a.exe")) is not None or host == "windows"
 
 
 class _TtyStdin(io.StringIO):
