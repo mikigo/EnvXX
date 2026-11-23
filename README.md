@@ -172,11 +172,12 @@ envxx run node@22:npm --version
 ### 不用每次写 envxx
 
 ```bash
-envxx python3.10 set-path      # 生成 ~/.envxx/bin/python3.10.exe
-envxx set-path ~/.envxx/bin    # 把这个目录放进 PATH
+envxx python3.10 set-path      # 生成 ~/.envxx/bin/python3.10.exe，并把 bin 目录加进 PATH
 ```
 
 之后新开的终端里直接 `python3.10 script.py`。`envxx bin` 列出已生成的所有命令。
+
+`set-path` 会检查 `~/.envxx/bin` 是否在 PATH 上，不在就自动加进去（已在则不动），不需要再手动跑一次 `envxx set-path ~/.envxx/bin`。
 
 目录默认加在**最前面**，刚加进去的应该优先；放末尾用 `--append`。已经存在的条目不动，重复执行是幂等的。
 

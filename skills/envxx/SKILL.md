@@ -126,8 +126,7 @@ Python 的版本目录来自 Astral 的官方索引，覆盖 3.8 到 3.16 的全
 ### 让工具直接可调用
 
 ```bash
-envxx python3.10 set-path      # 生成 ~/.envxx/bin/python3.10.exe
-envxx set-path ~/.envxx/bin    # 把这个目录放到 PATH 最前
+envxx python3.10 set-path      # 生成 ~/.envxx/bin/python3.10.exe，bin 不在 PATH 时自动加进去
 envxx bin                      # 列出已生成的命令
 ```
 

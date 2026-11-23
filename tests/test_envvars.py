@@ -297,6 +297,110 @@ def test_set_path_is_hidden_for_installers(capsys):
     assert "set-path" in capsys.readouterr().out
 
 
+def test_set_path_adds_the_bin_directory_when_it_is_missing(
+    tmp_path, monkeypatch, capsys
+):
+    """The command makes a launcher callable by name, and a directory nothing
+    searches cannot do that: the PATH entry is part of the job."""
+    from envxx.cli import main
+
+    folder = shims.shim_dir()
+    folder.mkdir(parents=True)
+    monkeypatch.setattr(
+        shims, "require_installed", lambda provider, version: "3.10.22"
+    )
+    monkeypatch.setattr(
+        shims,
+        "create",
+        lambda provider, version, label=None: [folder / "python3.10.exe"],
+    )
+    monkeypatch.setattr(envvars, "read_path", lambda system=False: r"C:\Windows")
+    added = []
+
+    def fake_set_path(directory, system=False, append=False):
+        added.append(directory)
+        return directory, True
+
+    monkeypatch.setattr(envvars, "set_path", fake_set_path)
+    monkeypatch.setattr("envxx.cli._remind_new_shell", lambda: None)
+
+    assert main(["python3.10", "set-path"]) == 0
+
+    assert added == [str(folder)], "the bin directory must be put on PATH"
+    # rich wraps at the terminal width, and a tmp_path is longer than that
+    printed = capsys.readouterr().out.replace("\n", "")
+    assert f"added {folder} to PATH" in printed
+    assert "not on PATH" not in printed
+
+
+def test_set_path_leaves_a_bin_directory_already_on_path_alone(
+    tmp_path, monkeypatch, capsys
+):
+    from envxx.cli import main
+
+    folder = shims.shim_dir()
+    folder.mkdir(parents=True)
+    monkeypatch.setattr(
+        shims, "require_installed", lambda provider, version: "3.10.22"
+    )
+    monkeypatch.setattr(
+        shims,
+        "create",
+        lambda provider, version, label=None: [folder / "python3.10.exe"],
+    )
+    monkeypatch.setattr(
+        envvars,
+        "read_path",
+        lambda system=False: os.pathsep.join([r"C:\Windows", str(folder)]),
+    )
+    monkeypatch.setattr(
+        envvars,
+        "set_path",
+        lambda *a, **k: pytest.fail("PATH must not be rewritten"),
+    )
+    monkeypatch.setattr("envxx.cli._remind_new_shell", lambda: None)
+
+    assert main(["python3.10", "set-path"]) == 0
+    assert "added" not in capsys.readouterr().out
+
+
+def test_a_failed_path_write_still_reports_the_created_shim(
+    tmp_path, monkeypatch, capsys
+):
+    """The launcher exists at that point; a PATH failure must not turn the
+    command into an error that hides it."""
+    from envxx.cli import main
+
+    folder = shims.shim_dir()
+    folder.mkdir(parents=True)
+    monkeypatch.setattr(
+        shims, "require_installed", lambda provider, version: "3.10.22"
+    )
+    monkeypatch.setattr(
+        shims,
+        "create",
+        lambda provider, version, label=None: [folder / "python3.10.exe"],
+    )
+    monkeypatch.setattr(envvars, "read_path", lambda system=False: r"C:\Windows")
+
+    def boom(*_args, **_kwargs):
+        raise OSError("access denied")
+
+    monkeypatch.setattr(envvars, "set_path", boom)
+    monkeypatch.setattr("envxx.cli._remind_new_shell", lambda: None)
+
+    assert main(["python3.10", "set-path"]) == 0
+
+    printed = capsys.readouterr()
+    # rich wraps a long path at the terminal width; the words are what matter
+    flat_out = printed.out.replace("\n", "")
+    flat_err = printed.err.replace("\n", "")
+    assert "created" in flat_out
+    assert str(folder / "python3.10.exe") in flat_out
+    assert "could not add" in flat_err
+    assert f"envxx set-path {folder}" in flat_err
+
+
 def test_bin_prints_the_whole_path(tmp_path, monkeypatch, capsys):
     """A truncated path is useless: the reader is meant to copy it."""
     from envxx.cli import main

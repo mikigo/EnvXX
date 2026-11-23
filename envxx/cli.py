@@ -547,19 +547,42 @@ def _add_tool_commands(group: typer.Typer, spec: ToolSpec) -> None:
             out.print(f"created {_display_path(path)}")
 
         folder = shims.shim_dir()
-        on_path = any(
-            Path(entry).expanduser() == folder
-            for entry in envvars.read_path().split(os.pathsep)
-            if entry
-        )
-        if not on_path:
-            err.print(
-                f"[dim]{folder} is not on PATH yet; "
-                f"run 'envxx set-path {folder}' to add it[/dim]"
-            )
-        else:
+        if _ensure_bin_on_path(folder):
             _remind_new_shell()
             out.print(f"[dim]run '{name}' once the terminal is reopened[/dim]")
+
+
+def _ensure_bin_on_path(folder: Path) -> bool:
+    """Put the shim directory on PATH when it is missing. True when on PATH.
+
+    The command exists to make a launcher callable by name, and a launcher in
+    a directory nothing searches cannot be called by name. Leaving the user to
+    notice the warning and run a second command splits one intention across
+    two steps, so the directory is added here; set_path is idempotent, so a
+    directory already on PATH is left untouched.
+
+    A failed PATH write is reported rather than raised: the launcher has
+    already been created, and turning that success into an error over the
+    second half of the job would only be confusing.
+    """
+    on_path = any(
+        Path(entry).expanduser() == folder
+        for entry in envvars.read_path().split(os.pathsep)
+        if entry
+    )
+    if on_path:
+        return True
+
+    try:
+        expanded, changed = envvars.set_path(str(folder))
+    except OSError as exc:
+        err.print(f"[yellow]could not add {folder} to PATH: {exc}[/yellow]")
+        err.print(f"[dim]run 'envxx set-path {folder}' to add it[/dim]")
+        return False
+
+    if changed:
+        out.print(f"added {expanded} to PATH")
+    return True
 
 
 def _default_label(provider: Provider, resolved: str) -> str:
