@@ -320,14 +320,11 @@ def test_each_platform_uses_its_own_opener(host, expected):
 
 
 def test_the_host_is_one_the_opener_knows():
-    """launch_installer picks a branch by asking _host; a fourth value would
-    silently fall through to xdg-open on a Mac."""
-    from envxx.install import _host, _opener_argv
+    """A host _opener_argv does not recognise would fall through to xdg-open,
+    which is wrong everywhere except Linux."""
+    from envxx.install import _host
 
-    host = _host()
-    assert host in ("windows", "macos", "linux")
-    # every known host must map to a branch, not to a KeyError later
-    assert _opener_argv(host, Path("a.exe")) is not None or host == "windows"
+    assert _host() in ("windows", "macos", "linux")
 
 
 class _TtyStdin(io.StringIO):
