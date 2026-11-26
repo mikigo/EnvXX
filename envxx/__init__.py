@@ -2,4 +2,4 @@
 
 # Kept here rather than in pyproject so a PyInstaller build reports the same
 # number as the installed package: the frozen binary has no metadata to read.
-__version__ = "1.10.0"
+__version__ = "2.1.0"

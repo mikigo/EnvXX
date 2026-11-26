@@ -182,6 +182,136 @@ def test_download_falls_back_when_mirror_lacks_the_file(tmp_path, monkeypatch):
     assert seen[-1].startswith("https://github.com/")
 
 
+class _DroppingBody(httpx.SyncByteStream):
+    """Hand over one chunk, then lose the peer mid-transfer."""
+
+    def __init__(self, first: bytes) -> None:
+        self.first = first
+
+    def __iter__(self):
+        yield self.first
+        raise httpx.ReadError("connection dropped")
+
+
+def test_download_resumes_after_midstream_drop(tmp_path, monkeypatch):
+    payload = b"0123456789"
+    ranges: list[str | None] = []
+    encodings: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        ranges.append(request.headers.get("range"))
+        encodings.append(request.headers.get("accept-encoding"))
+        start = int(ranges[-1].split("=")[1].rstrip("-")) if ranges[-1] else 0
+        if start:
+            return httpx.Response(
+                206,
+                content=payload[start:],
+                headers={"content-length": str(len(payload) - start)},
+            )
+        return httpx.Response(
+            200,
+            stream=_DroppingBody(payload[:4]),
+            headers={"content-length": str(len(payload))},
+        )
+
+    monkeypatch.setattr(http.time, "sleep", lambda _seconds: None)
+    # small chunks so the first body's bytes reach the file before it drops:
+    # iter_bytes buffers anything shorter than one chunk
+    monkeypatch.setattr(http, "_CHUNK", 4)
+    _mock_client(monkeypatch, handler)
+
+    dest = tmp_path / "out.bin"
+    http.download(
+        "https://example.test/a",
+        dest,
+        expected=hashlib.sha256(payload).hexdigest(),
+        show_progress=False,
+    )
+    assert ranges == [None, "bytes=4-"]
+    assert encodings == ["identity", "identity"]
+    assert dest.read_bytes() == payload
+    assert not dest.with_name(dest.name + ".part").exists()
+
+
+def test_download_detects_body_shorter_than_content_length(tmp_path, monkeypatch):
+    payload = b"0123456789"
+    ranges: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        ranges.append(request.headers.get("range"))
+        if ranges[-1]:
+            start = int(ranges[-1].split("=")[1].rstrip("-"))
+            return httpx.Response(
+                206,
+                content=payload[start:],
+                headers={"content-length": str(len(payload) - start)},
+            )
+        # the peer closed cleanly after 4 of the 10 promised bytes
+        return httpx.Response(
+            200, content=payload[:4], headers={"content-length": str(len(payload))}
+        )
+
+    monkeypatch.setattr(http.time, "sleep", lambda _seconds: None)
+    _mock_client(monkeypatch, handler)
+
+    dest = tmp_path / "out.bin"
+    http.download("https://example.test/a", dest, show_progress=False)
+    assert ranges == [None, "bytes=4-"]
+    assert dest.read_bytes() == payload
+
+
+def test_download_keeps_partial_file_when_retries_run_out(tmp_path, monkeypatch):
+    from envxx.errors import NetworkError
+
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(
+            200,
+            stream=_DroppingBody(b"1234"),
+            headers={"content-length": "10"},
+        )
+
+    monkeypatch.setattr(http.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(http, "_CHUNK", 4)
+    _mock_client(monkeypatch, handler)
+
+    dest = tmp_path / "out.bin"
+    with pytest.raises(NetworkError):
+        http.download("https://example.test/a", dest, show_progress=False)
+    assert calls["n"] == http._RETRIES
+    assert not dest.exists()
+    # the next run picks up from here instead of starting over
+    assert dest.with_name(dest.name + ".part").read_bytes() == b"1234"
+
+
+def test_download_falls_back_when_mirror_is_unreachable(tmp_path, monkeypatch):
+    payload = b"from-github"
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        if "dl.ccswitch.io" in str(request.url):
+            raise httpx.ConnectError("mirror down")
+        return httpx.Response(200, content=payload)
+
+    monkeypatch.setattr(http.time, "sleep", lambda _seconds: None)
+    monkeypatch.delenv("ENVXX_CCSWITCH_MIRROR", raising=False)
+    _mock_client(monkeypatch, handler)
+
+    url = (
+        "https://github.com/farion1231/cc-switch/releases/download/"
+        "v4.0.31/CC-Switch-v4.0.31-Windows-Portable.zip"
+    )
+    dest = tmp_path / "cc.zip"
+    http.download(url, dest, show_progress=False)
+    assert dest.read_bytes() == payload
+    assert seen[0].startswith("https://dl.ccswitch.io/")
+    assert seen[-1].startswith("https://github.com/")
+    assert sum("dl.ccswitch.io" in seen_url for seen_url in seen) == http._RETRIES
+
+
 def test_get_json_missing_ok_returns_none(tmp_path, monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404, json={"message": "Not Found"})

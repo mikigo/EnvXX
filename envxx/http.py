@@ -16,6 +16,11 @@ from .errors import ChecksumError, NetworkError
 DEFAULT_TTL = 24 * 60 * 60
 _RETRIES = 3
 _TIMEOUT = httpx.Timeout(30.0, read=120.0)
+# Long transfers break more often than metadata calls. A shorter idle timeout
+# plus a resume-from-offset retry recovers faster than waiting two minutes on
+# a dead socket, and a dropped body no longer fails the whole install.
+_DOWNLOAD_TIMEOUT = httpx.Timeout(30.0, read=45.0)
+_CHUNK = 1024 * 256
 
 # Officials prefix -> env var holding a replacement prefix.
 _MIRRORS = (
@@ -197,6 +202,75 @@ def parse_sha256_sum(text: str, filename: str) -> str | None:
     return None
 
 
+class _SourceMissing(Exception):
+    """A mirror does not carry the file (HTTP 404), so try the official URL."""
+
+
+def _download_once(
+    http: httpx.Client, source: str, part: Path, label: str, show_progress: bool
+) -> None:
+    """Fetch source into part in one request, resuming from what is on disk.
+
+    A break in the middle of the body raises httpx.TransportError, leaving the
+    bytes received so far in part for the next attempt to resume from.
+    """
+    offset = part.stat().st_size if part.is_file() else 0
+    # identity keeps content-length meaningful: iter_bytes would otherwise
+    # report decoded sizes that no longer match what the server announced
+    headers = {**_auth_headers(source), "Accept-Encoding": "identity"}
+    if offset:
+        headers["Range"] = f"bytes={offset}-"
+
+    with http.stream(
+        "GET", source, headers=headers, timeout=_DOWNLOAD_TIMEOUT
+    ) as response:
+        if response.status_code == 404:
+            raise _SourceMissing()
+        if offset and response.status_code == 200:
+            # server ignored the Range header, start over
+            offset = 0
+            part.unlink(missing_ok=True)
+        response.raise_for_status()
+        total = int(response.headers.get("content-length") or 0)
+        if response.status_code == 206:
+            total += offset
+        mode = "ab" if offset and response.status_code == 206 else "wb"
+        with _progress(label, total, show_progress, initial=offset) as tick, \
+                open(part, mode) as out:
+            for chunk in response.iter_bytes(_CHUNK):
+                out.write(chunk)
+                tick(len(chunk))
+
+    size = part.stat().st_size
+    if total and size != total:
+        # a cleanly closed connection can still cut the body short; without
+        # this the truncation would only surface later as a checksum mismatch
+        raise httpx.ReadError(f"incomplete body: {size} of {total} bytes")
+
+
+def _download_with_retries(
+    http: httpx.Client, source: str, part: Path, label: str, show_progress: bool
+) -> None:
+    last: Exception | None = None
+    for attempt in range(_RETRIES):
+        try:
+            _download_once(http, source, part, label, show_progress)
+            return
+        except _SourceMissing:
+            raise
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code < 500:
+                raise NetworkError(
+                    f"HTTP {exc.response.status_code} from {source}"
+                ) from exc
+            last = exc
+        except httpx.TransportError as exc:
+            last = exc
+        if attempt < _RETRIES - 1:
+            time.sleep(1.0 + attempt)
+    raise NetworkError(f"failed to fetch {source}: {last}")
+
+
 def download(
     url: str,
     dest: Path,
@@ -206,10 +280,10 @@ def download(
 ) -> Path:
     """Fetch url into dest, resuming a previous partial download when possible."""
     dest.parent.mkdir(parents=True, exist_ok=True)
+    label = dest.name
     part = dest.with_name(dest.name + ".part")
     if not resume:
         part.unlink(missing_ok=True)
-    offset = part.stat().st_size if part.is_file() else 0
 
     # a mirror may only carry recent releases, so keep the official URL as the
     # last resort rather than failing the install
@@ -218,28 +292,17 @@ def download(
         sources.append(url)
 
     with client() as http:
-        headers = dict(_auth_headers(url))
-        if offset:
-            headers["Range"] = f"bytes={offset}-"
         for index, source in enumerate(sources):
             is_last = index == len(sources) - 1
-            with http.stream("GET", source, headers=headers) as response:
-                if response.status_code == 404 and not is_last:
-                    continue
-                if offset and response.status_code == 200:
-                    # server ignored the Range header, start over
-                    offset = 0
-                    part.unlink(missing_ok=True)
-                response.raise_for_status()
-                total = int(response.headers.get("content-length") or 0)
-                if response.status_code == 206:
-                    total += offset
-                mode = "ab" if offset and response.status_code == 206 else "wb"
-                with _progress(dest.name, total, show_progress, initial=offset) as tick, \
-                        open(part, mode) as out:
-                    for chunk in response.iter_bytes(1024 * 256):
-                        out.write(chunk)
-                        tick(len(chunk))
+            try:
+                _download_with_retries(http, source, part, label, show_progress)
+                break
+            except _SourceMissing:
+                if is_last:
+                    raise NetworkError(f"not found: {url}")
+            except NetworkError:
+                if is_last:
+                    raise
 
     if expected:
         actual = sha256_file(part)
